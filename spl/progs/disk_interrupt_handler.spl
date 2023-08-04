@@ -1,0 +1,40 @@
+
+//save the sp
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//set sp to kernel stack
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
+
+//backup the reg vals into kernel stack
+backup;
+
+//disk is free to use
+[DISK_STATUS_TABLE + 0] = 0;
+
+//iterate through processes and change state of wait disk processes to ready
+alias ptr R0;
+ptr = 0;
+
+//60 processes
+while(ptr < MAX_PROC_NUM)do
+ 
+  //set all wait disk processes to ready   
+  if([PROCESS_TABLE + ptr * 16 + 4] == WAIT_DISK)then
+    
+    //set ready
+    [PROCESS_TABLE + ptr * 16 + 4] = READY;
+
+  endif;
+
+  ptr = ptr + 1;
+
+endwhile;
+
+
+//restore
+restore;
+
+//change SP to user stack
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1]) * 16 + 13];
+
+ireturn;

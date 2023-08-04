@@ -1,0 +1,33 @@
+int main()
+{
+decl
+  int temp, ptr, fileDesc1, fileDesc2;
+  string word;
+enddecl
+begin
+
+  //open file 1
+  fileDesc1 = exposcall("Open", "sample1.dat");
+
+  //open file 2
+  fileDesc2 = exposcall("Open", "sample2.dat");  
+
+  ptr = 0;
+
+  while(ptr >= 0)do
+
+    //get file name
+    ptr = exposcall("Read", fileDesc1, word);
+
+
+    //write word
+    temp = exposcall("Write", fileDesc2, word);
+
+
+  endwhile;
+
+  return 0;
+
+end
+
+}

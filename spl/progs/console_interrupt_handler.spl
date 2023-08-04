@@ -1,0 +1,40 @@
+//console interrupt
+
+//save the sp
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//set sp to kernel stack
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE + 1] * 16) + 11] * 512 - 1;
+
+//backup the reg vals into kernel stack
+backup;
+
+alias reqPID R1;
+//the pid of process that called read
+reqPID = [TERMINAL_STATUS_TABLE + 1];
+
+
+//save data in input buffer of the process
+//[PROCESS_TABLE + reqPID * 16 + 8] = P0;
+
+//save val in p0 in addr spec in inpt buffer
+[PROCESS_TABLE + reqPID * 16 + 8] = P0;
+
+multipush(R0, R1, R2, R3);
+//release the terminal
+R1 = RELEASE_TERMINAL;
+R2 = [TERMINAL_STATUS_TABLE + 1];
+//call resource manager
+call RESOURCE_MANAGER;
+
+multipop(R0, R1, R2, R3);
+
+
+//restore the reg vals from kernel stack
+restore;
+
+//change SP to user stack
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1]) * 16 + 13];
+
+ireturn;
+

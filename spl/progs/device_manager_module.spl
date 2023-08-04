@@ -1,0 +1,177 @@
+//device manager
+
+alias functionNum R1;
+alias currentPID R2;
+alias pageNo R3;
+alias blockNo R4;
+
+
+//code for terminal write
+if(functionNum == TERMINAL_WRITE) then
+  //acquire terminal
+  multipush(R0, R1, R2, R3);
+  R1 = ACQUIRE_TERMINAL;
+  //R2 already contains currentPID
+  call RESOURCE_MANAGER;
+  //print the word
+  print R3;
+  multipop(R0, R1, R2, R3);
+  
+  //release terminal
+  multipush(R0, R1, R2, R3);
+  R1 = RELEASE_TERMINAL;
+  //R2 already contains currentPID
+  call RESOURCE_MANAGER;
+  // I didn't save the return value from the caller present in R0
+  multipop(R0, R1, R2, R3); 
+  return;
+endif;
+
+
+//code for terminal read
+if(functionNum == TERMINAL_READ) then
+  
+
+  //acquire terminal
+  multipush(R0, R1, R2, R3, R4);
+  R1 = ACQUIRE_TERMINAL;
+  //R2 already contains currentPID
+  call RESOURCE_MANAGER;
+  
+  //restore the reg vals 
+  multipop(R0, R1, R2, R3, R4);
+
+  
+  //read 
+  read; 
+  
+  //context switch
+  
+  //change state of process to wait terminal
+  [PROCESS_TABLE + currentPID * 16 + 4] = WAIT_TERMINAL;
+
+  
+  //push all regs 
+  multipush(R0, R1, R2, R3, R4);
+  
+  //call scheduler
+  call CONTEXT_SWITCH; 
+  
+  //restore reg vals
+  multipop(R0, R1, R2, R3, R4);
+
+
+  //store val in input buffer in R3 addr
+  [[PTBR + 2 * (( R3 ) / 512)] * 512 + (( R3 ) % 512)] = [PROCESS_TABLE + currentPID * 16 + 8];
+
+
+  return; 
+endif;
+
+//code for disk load
+if(functionNum == DISK_LOAD) then
+
+  //acquire disk
+
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4);
+  
+  //set fun no
+  R1 = ACQUIRE_DISK;
+
+  //R2 already contains currentPID
+  R2 = currentPID;
+
+  call RESOURCE_MANAGER;
+
+  //restore the reg vals
+  multipop(R0, R1, R2, R3, R4);
+
+
+  //alter disk status table
+
+  //disk status is already set in disk status table
+
+  //set load/store bit as load in disk status table
+  [DISK_STATUS_TABLE + 1] = 0; 
+
+  //set page no in disk status table
+  [DISK_STATUS_TABLE + 2] = pageNo;
+
+  //set block no in disk status table
+  [DISK_STATUS_TABLE + 3] = blockNo;
+
+  //pid is already set in disk status table
+
+
+  //load the block into page
+  load(pageNo, blockNo);
+
+  //set process to wait
+  [PROCESS_TABLE + currentPID * 16 + 4] = WAIT_DISK;
+
+
+  //call scheduler
+  call CONTEXT_SWITCH;
+
+
+  return;
+
+endif;
+
+//store in disk
+if(functionNum == DISK_STORE)then
+
+  //acquire disk
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4);
+
+  //set fun no
+  R1 = ACQUIRE_DISK;
+
+  //R2 already contains currentPID
+  R2 = currentPID;
+
+  call RESOURCE_MANAGER;
+
+  //restore the reg vals
+  multipop(R0, R1, R2, R3, R4);
+
+  //set vals in disk status table
+
+  //status is already set
+
+  //set load/store bit
+  [DISK_STATUS_TABLE + 1] = 1;
+
+  //set page no
+  [DISK_STATUS_TABLE + 2] = pageNo;
+
+  //set block no
+  [DISK_STATUS_TABLE + 3] = blockNo;
+
+  //set pid
+  [DISK_STATUS_TABLE + 4] = currentPID;
+
+  //store in disk
+  store(pageNo, blockNo);
+
+  //set state
+  [PROCESS_TABLE + currentPID * 16 + 4] = WAIT_DISK;
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4);
+
+  //call scheduler
+  call CONTEXT_SWITCH;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4);
+  
+  return;
+
+endif;
+
+return;

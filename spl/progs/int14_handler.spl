@@ -1,0 +1,173 @@
+//int 14 handler (semlock and semunlock) 
+
+//save the sp in its process table
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//sys call no
+alias sys_call R1;
+sys_call = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+
+//switch sp to kernel stack
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 - 1;
+
+//semlock sys call
+
+if(sys_call == INT_SEMLOCK)then
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_SEMLOCK;
+
+  //get sem desc
+  alias sem_desc R2;
+  sem_desc = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  //sem index
+  alias sem_index R3;
+  sem_index = [[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2 + 1];
+
+  //check validity
+  if((sem_desc < 0) || (sem_desc > 7) || ([[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2] != SEMAPHORE))then
+
+    //set ret value in user stack (invalid sem desc)
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -1;
+
+    //reset mode flag
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+    //reset sp to user stack
+    SP = userSP;
+
+    //ret to user mode
+    ireturn;
+
+  endif;
+
+  while(([SEMAPHORE_TABLE + sem_index * 4 + 0] != [SYSTEM_STATUS_TABLE + 1]) && ([SEMAPHORE_TABLE + sem_index * 4 + 0] != -1))do
+
+    //change state to wait sem
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 4] = WAIT_SEMAPHORE;
+    
+    //set sem idx
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 5] = sem_index;
+
+    //multipush
+    multipush(R0, R1, R2, R3);
+    
+    //context switch
+    call CONTEXT_SWITCH;
+
+    //multipop
+    multipop(R0, R1 ,R2, R3);
+
+  endwhile;
+
+  //change locking pid
+  [SEMAPHORE_TABLE + sem_index * 4 + 0] = [SYSTEM_STATUS_TABLE + 1];
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //reset sp to user stack
+  SP = userSP;
+
+  //ret to user mode
+  ireturn;
+
+endif;
+
+
+//semunlock sys call
+if(sys_call == INT_SEMUNLOCK)then
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_SEMUNLOCK;
+
+  //get sem desc
+  alias sem_desc R2;
+  sem_desc = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  //sem index
+  alias sem_index R3;
+  sem_index = [[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2 + 1];
+
+  //check validity
+  if((sem_desc < 0) || (sem_desc > 7) || ([[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2] != SEMAPHORE))then
+
+    //set ret value in user stack (invalid sem desc)
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -1;
+
+    //reset mode flag
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+    //reset sp to user stack
+    SP = userSP;
+
+    //ret to user mode
+    ireturn;
+
+  endif;
+
+  if(([SEMAPHORE_TABLE + sem_index * 4 + 0] != -1))then
+
+    if([SEMAPHORE_TABLE + sem_index * 4 + 0] != [SYSTEM_STATUS_TABLE + 1])then
+
+      //set ret value in user stack (not the processes that locked)
+      [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -2;
+
+      //reset mode flag
+      [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+      //reset sp to user stack
+      SP = userSP;
+
+      //ret to user mode
+      ireturn;
+
+    endif;    
+
+  //change locking pid
+  [SEMAPHORE_TABLE + sem_index * 4 + 0] = -1;
+  
+  //reset all waiting process to ready
+  alias ptr R4;
+  ptr = 0;
+
+  while(ptr < MAX_PROC_NUM)do
+
+    if(([PROCESS_TABLE + ptr * 16 + 4] == WAIT_SEMAPHORE) && ([PROCESS_TABLE + ptr * 16 + 5] == sem_index))then
+
+      //set ready
+      [PROCESS_TABLE + ptr * 16 + 4] = READY;
+
+      //set -1
+      [PROCESS_TABLE + ptr * 16 + 5] = -1;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;   
+
+  endif;
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //reset sp to user stack
+  SP = userSP;
+
+  //ret to user mode
+  ireturn;
+
+endif;
+
+//switch back
+SP = userSP;
+
+//ret to user mode
+ireturn;
+

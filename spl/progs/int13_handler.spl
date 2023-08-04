@@ -1,0 +1,179 @@
+//int 13 handler (semget and semrelease)
+
+//save the sp in its process table
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//sys call no
+alias sys_call R1;
+sys_call = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+
+//switch sp to kernel stack
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 - 1;
+
+//for sem get sys call
+if(sys_call == INT_SEMGET)then
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_SEMGET;
+
+  //sem desc
+  alias sem_desc R2;
+  sem_desc = 0;
+
+  while(sem_desc < 8)do
+
+    if(([[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2] < 0) || ([[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2] > 1))then
+
+      break;
+
+    endif;
+
+    sem_desc = sem_desc + 1;
+
+  endwhile;
+
+  if(sem_desc == 8)then
+
+    //set ret value in user stack (no sem desc available)
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -1;
+
+    //reset mode flag
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+    //reset sp to user stack
+    SP = userSP;
+
+    //ret to user mode
+    ireturn;
+
+  endif;
+
+  //set entry as semaphore
+  [[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2 + 0] = SEMAPHORE; 
+
+  //aqcuire semaphore
+ 
+  //ret value
+  alias retValue R3;
+  
+  //multipush
+  multipush(R0, R1, R2);
+
+  //set fn no
+  R1 = ACQUIRE_SEMAPHORE;
+
+  //set pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+
+  //set ret val
+  retValue = R0;
+
+  //multipop
+  multipop(R0, R1, R2);
+
+  if(retValue == MAX_SEM_COUNT)then
+
+    //set ret value in user stack (max sem)
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -2;
+
+    //reset mode flag
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+    //reset sp to user stack
+    SP = userSP;
+
+    //ret to user mode
+    ireturn;
+
+  endif;
+
+  //save sem index
+  [[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2 + 1] = retValue;
+
+  //set ret value in user stack (sem desc )
+  [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = sem_desc;
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //reset sp to user stack
+  SP = userSP;
+
+  //ret to user mode
+  ireturn;
+
+endif;
+
+//sem release 
+if(sys_call == INT_SEMRELEASE)then
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_SEMRELEASE;
+
+  //get sem id
+  alias semid R2;
+  semid = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  //check validity
+  if((semid < 0) || (semid > 7) || ([[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + semid * 2] != SEMAPHORE))then
+
+    //set ret value in user stack (invalid semid)
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -1;
+
+    //reset mode flag
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+    //reset sp to user stack
+    SP = userSP;
+
+    //ret to user mode
+    ireturn;
+
+  endif;
+
+  //call release semaphore 
+ 
+  //multipush
+  multipush(R0, R1, R2, R3);
+ 
+  //set fn no
+  R1 = RELEASE_SEMAPHORE;
+
+  //set pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //set sem id
+  R3 = semid;
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3);
+
+  //reset vals in per process resource table
+  [[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + semid * 2] = -1; 
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //reset sp to user stack
+  SP = userSP;
+
+  //ret to user mode
+  ireturn;
+
+endif;
+
+//switch back
+SP = userSP;
+
+//ret to user mode
+ireturn;

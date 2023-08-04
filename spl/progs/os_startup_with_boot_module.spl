@@ -1,0 +1,172 @@
+//boot module
+loadi(54, 67);
+loadi(55, 68);
+
+//idle process code
+loadi(69, 11);
+
+//set sp to idle process ksp
+SP = 76*512 - 1;
+
+call BOOT_MODULE;
+
+//set page table base reg
+PTBR = PAGE_TABLE_BASE;
+PTLR = 10;
+
+//idle process page table memory alloc
+
+//library
+[PTBR+0] = -1;
+[PTBR+1] = "0000";
+
+[PTBR+2] = -1;
+[PTBR+3] = "0000";
+
+//heap
+[PTBR+4] = -1;
+[PTBR+5] = "0000";
+
+[PTBR+6] = -1;
+[PTBR+7] = "0000";
+
+//code 
+[PTBR+8] = 69;
+[PTBR+9] = "0100";
+
+[PTBR+10] = -1;
+[PTBR+11] = "0000";
+
+[PTBR+12] = -1;
+[PTBR+13] = "0000";
+
+[PTBR+14] = -1;
+[PTBR+15] = "0000";
+
+//stack
+[PTBR+16] = 70;
+[PTBR+17] = "0110";
+
+[PTBR+18] = -1;
+[PTBR+19] = "0000";
+
+//set pid for idle process in its process table
+[PROCESS_TABLE+1] = 0;
+
+// idle process
+[PROCESS_TABLE+4] = RUNNING;
+
+//set user area page no for idle process
+[PROCESS_TABLE+11] = 76;
+
+//mark in mem
+[MEMORY_FREE_LIST + 76] = 1;
+
+//set kernel stack pointer to 0
+[PROCESS_TABLE+12] = 0;
+
+//set user stack pointer
+[PROCESS_TABLE+13] = 8*512;
+
+//set page table base reg
+[PROCESS_TABLE+14] = PAGE_TABLE_BASE;
+
+//set page table len reg
+[PROCESS_TABLE+15] = 10;
+
+//set pid in sys status table
+[SYSTEM_STATUS_TABLE + 1] = 0;
+
+//set entry point value in user stack
+[70*512] = [69*512 + 1];
+
+
+//swapper daemon
+PTBR = PAGE_TABLE_BASE + 15 * 20;
+
+//process table addr
+alias process_table_addr R1;
+process_table_addr = PROCESS_TABLE + 15 * 16;
+
+//library
+[PTBR+0] = -1;
+[PTBR+1] = "0000";
+
+[PTBR+2] = -1;
+[PTBR+3] = "0000";
+
+//heap
+[PTBR+4] = -1;
+[PTBR+5] = "0000";
+
+[PTBR+6] = -1;
+[PTBR+7] = "0000";
+
+//code
+[PTBR+8] = 69;
+[PTBR+9] = "0100";
+
+[PTBR+10] = -1;
+[PTBR+11] = "0000";
+
+[PTBR+12] = -1;
+[PTBR+13] = "0000";
+
+[PTBR+14] = -1;
+[PTBR+15] = "0000";
+
+//stack
+[PTBR+16] = 81;
+[PTBR+17] = "0110";
+
+//mark in mem free list
+[MEMORY_FREE_LIST + 81] = 1;
+
+[PTBR+18] = -1;
+[PTBR+19] = "0000";
+
+//tick
+[process_table_addr + 0] = 0;
+
+//userid(kernel)
+[process_table_addr + 3] = 0;
+
+//pid
+[process_table_addr + 1] = 15;
+
+//state
+[process_table_addr + 4] = CREATED;
+
+//user area page
+[process_table_addr + 11] = 82;
+
+//mark in mem
+[MEMORY_FREE_LIST + 82] = 1;
+
+//kernel ptr
+[process_table_addr + 12] = 0;
+
+//user stack ptr
+[process_table_addr + 13] = 8 * 512;
+
+//store the ip
+[81 * 512] = [69 * 512 + 1];
+
+//set SP 
+SP = 8 * 512;
+
+
+//idle process
+PTBR = PAGE_TABLE_BASE + 0 * 20;
+PTLR = 10;
+
+//set vals in sys status table
+
+//mem free count
+[SYSTEM_STATUS_TABLE + 2] = 45;
+
+//wait mem count
+[SYSTEM_STATUS_TABLE + 3] = 0;
+
+ireturn;
+

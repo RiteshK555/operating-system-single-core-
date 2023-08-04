@@ -1,0 +1,364 @@
+//int 5 handler (open and close)
+
+//save the sp in its process table
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//sys call no
+alias sys_call R1;
+sys_call = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+
+//switch sp to kernel stack
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 - 1;
+
+//process table addr
+alias process_table_addr R2;
+process_table_addr = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+//open sys call
+if(sys_call == INT_OPEN)then
+
+  //set mode flag
+  [process_table_addr + 9] = INT_OPEN;
+
+  //per process resource table entry
+  alias resource_table_entry R3;
+  resource_table_entry = 0;
+
+  //user area page no
+  alias user_area_page R4;
+  user_area_page = [process_table_addr + 11];
+
+  //find free resource  
+  while(resource_table_entry < 8)do
+
+    if([user_area_page * 512 + RESOURCE_TABLE_OFFSET + resource_table_entry * 2] == -1)then
+
+      break;
+
+    endif;
+
+    resource_table_entry = resource_table_entry + 1;
+
+  endwhile; 
+
+  //return value
+  alias retValue R5;
+  retValue = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512);
+
+  //no free entry
+  if(resource_table_entry == 8)then
+
+    //set ret value to -3
+    [retValue] = -3;
+
+    goto label_ireturn;
+ 
+  endif;
+
+  //get file name
+  alias file_name R6;
+  file_name = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  //open file table index
+  alias open_file_table_index R7;
+
+  // open from file manager
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6);
+
+  //set fn no
+  R1 = OPEN;
+
+  //set file name
+  R2 = file_name;
+
+  //call file manager
+  call FILE_MANAGER;
+
+  if(R0 < 0)then
+
+    //set ret value to -3
+    [retValue] = R0;
+
+    goto label_ireturn;
+
+  endif;
+
+  open_file_table_index = R0;
+ 
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6);
+  
+  //set file/semaphore
+  [user_area_page * 512 + RESOURCE_TABLE_OFFSET + resource_table_entry * 2 + 0] = FILE;  
+
+  //set open file table entry
+  [user_area_page * 512 + RESOURCE_TABLE_OFFSET + resource_table_entry * 2 + 1] = open_file_table_index;
+
+  //set ret value to resource table index
+  [retValue] = resource_table_entry;
+
+  goto label_ireturn;
+ 
+endif;
+
+//close sys call
+if(sys_call == INT_CLOSE)then
+
+  //set mode flag
+  [process_table_addr + 9] = INT_CLOSE;
+
+  //get file desc 
+  alias file_desc R3;
+  file_desc = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  //ret value
+  alias ret_value R4;
+  ret_value = [PTBR + 2 * ((userSP - 1)) / 512] * 512 + ((userSP - 1) % 512);
+
+  //invalid file desc
+  if((file_desc < 0) || (file_desc > 7))then
+
+    //set ret value
+    [ret_value] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //pid
+  alias currentPID R5;
+  currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+  //user area page no
+  alias user_area_page R6;
+  user_area_page = [process_table_addr + 11];
+
+  //check if it is a file
+  if([process_table_addr + user_area_page * 512 + RESOURCE_TABLE_OFFSET + file_desc * 2] != FILE)then
+
+    //set ret value
+    [ret_value] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //open file table index
+  alias open_file_table_index R7;
+  open_file_table_index = [process_table_addr + user_area_page * 512 + RESOURCE_TABLE_OFFSET + file_desc * 2 + 1];
+
+  //call close fn in file manager
+  
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6, R7);
+
+  //set fn no
+  R1 = CLOSE;
+
+  //set open file table index
+  R2 = open_file_table_index;
+
+  //call file manager
+  call FILE_MANAGER;
+
+  //multipop   
+  multipop(R0, R1, R2, R3, R4, R5, R6, R7);
+  
+  //reset per process resource table entry
+
+  // file/semaphore
+  [process_table_addr + user_area_page * 512 + RESOURCE_TABLE_OFFSET + file_desc * 2 + 0] = -1;
+
+  //open file table index
+  [process_table_addr + user_area_page * 512 + RESOURCE_TABLE_OFFSET + file_desc * 2 + 1] = -1;
+
+  //set ret value
+  [ret_value] = 0;
+
+  goto label_ireturn;
+
+endif;
+
+//seek sys call
+if(sys_call == INT_SEEK)then
+
+  //set mode flag
+  [process_table_addr + 9] = INT_SEEK;
+
+  //file desc
+  alias file_desc R3;
+  file_desc = [[PTBR + ((userSP - 4) / 512) * 2] * 512 + ((userSP - 4) % 512)];
+
+  //offset val
+  alias offset_val R4;
+  offset_val = [[PTBR + ((userSP - 3) / 512) * 2] * 512 + ((userSP - 3) % 512)];
+
+  //ret val
+  alias ret_val R5;
+  ret_val = [PTBR + ((userSP - 1) / 512) * 2] * 512 + ((userSP - 1) % 512);
+
+  //invalid file desc
+  if((file_desc < 0) || (file_desc > 7))then
+
+    //ret -1
+    [ret_val] = -1;
+
+    goto label_ireturn;
+ 
+  endif;
+
+  //pid
+  alias currentPID R6;
+  currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+  //user area page 
+  alias user_area_page R7;
+  user_area_page = [process_table_addr + 11];
+
+  //resource table entry addr
+  alias resource_table_entry_addr R8;
+  resource_table_entry_addr = user_area_page * 512 + RESOURCE_TABLE_OFFSET + file_desc * 2;
+
+  //check file
+  if([resource_table_entry_addr + 0] != FILE)then
+
+    //ret -1
+    [ret_val] = -1;
+
+
+    goto label_ireturn;
+
+  endif;
+
+  //open file table entry index
+  alias open_file_table_entry_index R9;
+  open_file_table_entry_index = [resource_table_entry_addr + 1]; 
+ 
+  //inode index
+  alias inode_index R10;
+  inode_index = [OPEN_FILE_TABLE + open_file_table_entry_index * 4 + 0];
+
+  //acquire inode
+ 
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10);
+
+  //call resource manager
+
+  //fn no
+  R1 = ACQUIRE_INODE;
+
+  //pid
+  R2 = currentPID;
+
+  //inode index
+  R3 = inode_index;
+  
+
+  call RESOURCE_MANAGER;
+
+  //fail
+  if(R0 < 0)then
+
+    //ret -1
+    [ret_val] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10);
+
+  //file size
+  alias file_size R11;
+  file_size = [INODE_TABLE + inode_index * 16 + 2];
+
+  if([INODE_TABLE + inode_index * 16 + 0] == ROOT)then
+  
+    //root file
+    file_size = 480;
+
+  endif;
+
+  //lseek addr
+  alias lseek_addr R12;
+  lseek_addr = OPEN_FILE_TABLE + 4 * open_file_table_entry_index + 2;
+
+
+  //check for < 0
+  if((([lseek_addr] + offset_val) < 0))then
+
+    //ret -2
+    [ret_val] = -2;
+
+    goto label_ireturn;
+ 
+  endif;
+
+  if(offset_val == 0)then
+
+    //set lseek val 
+    [lseek_addr] = 0;
+
+  else
+
+    if([lseek_addr] + offset_val > file_size)then
+
+      //set lseek val to file size
+      [lseek_addr] = file_size;
+
+    else
+
+      //increment by offset val
+      [lseek_addr] = [lseek_addr] + offset_val;
+
+    endif;
+
+  endif;
+  
+  //release inode
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12);
+
+  //call resource manager
+
+  //fn no
+  R1 = RELEASE_INODE;
+
+  //pid
+  R2 = currentPID;
+
+  //inode index
+  R3 = inode_index;
+
+  call RESOURCE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12);
+ 
+  //ret 0
+  [ret_val] = 0;
+
+  goto label_ireturn;
+
+endif;
+
+label_ireturn:
+
+//reset mode flag
+[process_table_addr + 9] = 0;
+
+//reset sp to user stack
+SP = userSP;
+
+//ret to user mode
+ireturn;
+

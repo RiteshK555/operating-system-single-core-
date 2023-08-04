@@ -1,0 +1,36 @@
+int main()
+{
+decl
+
+int temp, temp1;
+
+enddecl
+begin
+  
+  //call fork
+  temp = exposcall("Fork");
+  
+
+  if(temp > 0)then
+
+    //print 
+    write("success parent");
+
+  
+    temp1 = exposcall("Exec", "odd.xsm");
+
+  else 
+ 
+    //print
+    write("success child");
+
+
+    temp1 = exposcall("Exec", "even.xsm");
+    
+  endif;
+
+  return 0;
+
+end
+}
+

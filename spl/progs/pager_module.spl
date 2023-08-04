@@ -1,0 +1,395 @@
+//pager module
+
+//fn no
+alias functionNum R1;
+
+alias ptr R2;
+
+//swap out fn
+if(functionNum == SWAP_OUT)then
+
+  //choose a fn to swap out
+
+  //not idle, init, shell
+  ptr = 3;
+
+  while(ptr < MAX_PROC_NUM)do
+
+    if([PROCESS_TABLE + ptr * 16 + 4] == WAIT_PROCESS)then
+
+      break;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  if(ptr == MAX_PROC_NUM)then
+
+    ptr = 3;
+
+    while(ptr < MAX_PROC_NUM)do
+
+      if([PROCESS_TABLE + ptr * 16 + 4] == WAIT_SEMAPHORE)then
+
+        break;
+
+      endif;
+
+      ptr = ptr + 1;
+
+    endwhile;
+
+  endif;
+
+  alias process_id R3;
+  process_id = 0;
+
+  if(ptr == MAX_PROC_NUM)then
+
+    ptr = 3;
+
+    alias tick R1;
+    tick = 0;
+
+    while(ptr < MAX_PROC_NUM)do
+
+      if(([PROCESS_TABLE + ptr * 16 + 0] > tick) && ([PROCESS_TABLE + ptr * 16 + 4] != TERMINATED) && ([PROCESS_TABLE + ptr * 16 + 4] != ALLOCATED) && ([PROCESS_TABLE + ptr * 16 + 4] != RUNNING) && ([PROCESS_TABLE + ptr * 16 + 6] != 1))then
+
+        process_id = ptr; 
+
+        tick = [PROCESS_TABLE + ptr * 16 + 0];
+
+      endif; 
+
+      ptr = ptr + 1;
+
+    endwhile;
+
+  endif;
+
+  if(process_id == 0)then
+
+    process_id = ptr;
+
+  endif;
+
+  if(process_id == MAX_PROC_NUM)then
+
+    //reset paging status
+    [SYSTEM_STATUS_TABLE + 5] = 0;
+
+    return;
+
+  endif;
+
+  //process table addr
+  alias process_table_addr R4;
+  process_table_addr = PROCESS_TABLE + process_id * 16;
+
+  //reset tick value
+  [process_table_addr + 0] = 0;
+
+  //page table addr
+  alias page_table_addr R5;
+  page_table_addr = PAGE_TABLE_BASE + process_id * 20;
+
+  //ptr 
+  ptr = 4;
+
+  //code pages
+  while(ptr < 8)do
+
+    //check page
+    if([page_table_addr + ptr * 2] != -1)then
+
+      //release page
+
+      //multipush
+      multipush(R0, R1, R2, R3, R4, R5);
+
+      //release page 
+      R1 = RELEASE_PAGE;
+
+      //page no
+      R2 = [page_table_addr + ptr * 2];
+
+      //multipop
+      multipop(R0, R1, R2, R3, R4, R5);
+
+      [page_table_addr + ptr * 2] = -1;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile; 
+
+  //heap pages
+  ptr = 2;
+
+  alias pageNo R6;
+
+  while(ptr < 4)do
+
+    pageNo = [page_table_addr + ptr * 2];
+
+    if((pageNo != -1) && ([MEMORY_FREE_LIST + pageNo] == 1))then
+
+      call label_swap_out;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  //stack pages
+  ptr = 8;
+
+  while(ptr < 10)do
+
+    pageNo = [page_table_addr + ptr * 2];
+
+    if(pageNo != -1)then
+
+      call label_swap_out;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  //set swap flag
+  [process_table_addr + 6] = 1;
+
+  //increase swap count
+  [SYSTEM_STATUS_TABLE + 4] = [SYSTEM_STATUS_TABLE + 4] + 1;
+
+  //reset paging status to 0
+  [SYSTEM_STATUS_TABLE + 5] = 0;
+
+  return; 
+
+  label_swap_out:
+ 
+  //get swap block
+
+  //multipush
+  multipush(R0, R1);
+
+  //fn no
+  R1 = GET_SWAP_BLOCK;
+
+  //call mem manager
+  call MEMORY_MANAGER;
+
+  //set in disk map table
+  [DISK_MAP_TABLE + process_id * 10 + ptr] = R0;
+
+  //multipop
+  multipop(R0, R1);
+
+  //store the page in block
+
+  //disk store
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6);
+
+  //disk no
+  R4 = [DISK_MAP_TABLE + process_id * 10 + ptr];
+
+  //fn no
+  R1 = DISK_STORE;
+
+  //pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //page no
+  R3 = pageNo;
+
+  call DEVICE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6);
+
+  //release the page
+
+  //multipush
+  multipush(R1, R2, R4);
+
+  //fn no
+  R1 = RELEASE_PAGE;
+
+  //page no
+  R2 = pageNo;
+
+  call MEMORY_MANAGER;
+
+  //multipop
+  multipop(R1, R2, R4);
+
+  //reset page
+  [page_table_addr + ptr * 2] = -1;
+
+
+  return; 
+
+endif;
+
+//swap in fn
+if(functionNum == SWAP_IN)then
+
+  ptr = 0;
+
+  //find a process to swap in
+  while(ptr < MAX_PROC_NUM)do
+
+    if(([PROCESS_TABLE + ptr * 16 + 6] == 1) && ([PROCESS_TABLE + ptr * 16 + 4] == READY))then
+  
+      break;   
+ 
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+
+  //if no process
+  if(ptr == MAX_PROC_NUM)then
+
+    //reset paging status
+    [SYSTEM_STATUS_TABLE + 5] = 0;
+
+    return;
+
+  endif;
+
+  //process table addr
+  alias process_table_addr R3;
+  process_table_addr = PROCESS_TABLE + ptr * 16;
+
+  //reset tick value
+  [process_table_addr + 0] = 0;
+
+  //page table addr
+  alias page_table_addr R4;
+  page_table_addr = PAGE_TABLE_BASE + ptr * 20;
+
+
+  //pid
+  alias process_id R5;
+  process_id = ptr;
+
+  //heap pages
+  ptr = 2;
+
+  while(ptr < 4)do
+
+    call label_swap_in;
+
+  endwhile; 
+
+
+  //stack pages
+  ptr = 8;
+
+  while(ptr < 10)do
+
+    call label_swap_in;
+
+  endwhile;
+
+
+  //reset swap flag
+  [process_table_addr + 6] = 0;
+
+  //decrement swap count
+  [SYSTEM_STATUS_TABLE + 4] = [SYSTEM_STATUS_TABLE + 4] - 1;
+
+  //reset paging status
+  [SYSTEM_STATUS_TABLE + 5] = 0;
+
+  return;
+
+  label_swap_in:
+
+  if([page_table_addr + ptr * 2] == -1)then
+
+    //get free page
+      
+    //multipush
+    multipush(R0, R1, R2, R3, R4);
+
+    //call memory manager
+    R1 = GET_FREE_PAGE;
+
+    call MEMORY_MANAGER;
+
+    //multipop
+    multipop(R1, R2, R3, R4);
+
+    //set in page table
+    [page_table_addr + ptr * 2] = R0;
+
+    //set permissions
+    [page_table_addr + ptr * 2 + 1] = "0110";
+     
+    //multipop
+    multipop(R0);
+
+    //disk load
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5);
+
+    //call device manager
+
+    //page no
+    R3 = [page_table_addr + ptr * 2];
+
+    //disk no
+    R4 = [DISK_MAP_TABLE + process_id * 10 + ptr];
+
+    //pid
+    R2 = [SYSTEM_STATUS_TABLE + 1];
+
+    //fn no
+    R1 = DISK_LOAD;
+
+    call DEVICE_MANAGER;
+
+    //multipop
+    multipop(R0, R1, R2, R3, R4, R5);
+
+    //free swap block
+
+    //multipush
+    multipush(R1, R2);
+
+    //block no
+    R2 = [DISK_MAP_TABLE + process_id * 10 + ptr];
+
+    //fn no
+    R1 = RELEASE_BLOCK;
+
+    //call memory manager
+    call MEMORY_MANAGER;
+
+    //multipop
+    multipop(R1, R2);
+
+    //invalidate disk map table
+    [DISK_MAP_TABLE + process_id * 10 + ptr] = -1;
+
+  endif;
+
+  ptr = ptr + 1;
+
+  return;
+
+endif;

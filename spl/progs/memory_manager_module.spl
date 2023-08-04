@@ -1,0 +1,243 @@
+//memory manager module
+
+alias functionNum R1;
+alias pageNum R2;
+
+
+//get free page
+if(functionNum == GET_FREE_PAGE)then
+
+  //increase no of processes waiting for mem
+  [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] + 1;
+  
+  //wait till mem is available
+  while([SYSTEM_STATUS_TABLE + 2] == 0)do
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 4] = WAIT_MEM;
+
+    //multipush
+    multipush(R0, R1, R2);
+   
+    //context switch
+    call CONTEXT_SWITCH; 
+
+    //multipop
+    multipop(R0, R1, R2);
+
+  endwhile;
+  
+  //decrease no of processes waiting for mem
+  [SYSTEM_STATUS_TABLE + 3] = [SYSTEM_STATUS_TABLE + 3] - 1;
+ 
+  //decrease memory count
+  [SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] - 1;
+ 
+  //find the page no
+  alias pageNo R0;
+  pageNo = 76;
+ 
+  //find free page in mem free list
+  while(pageNo < MAX_MEM_PAGE)do
+    if([MEMORY_FREE_LIST + pageNo] == 0)then
+      break;
+    endif;
+    pageNo = pageNo + 1;
+  endwhile;
+
+  return;
+endif;
+
+//release page
+if(functionNum == RELEASE_PAGE)then
+  
+  
+  //decrease in mem free list 
+  [MEMORY_FREE_LIST + pageNum] = [MEMORY_FREE_LIST + pageNum] - 1;
+
+  //if mem is free 
+  if([MEMORY_FREE_LIST + pageNum] == 0)then
+
+    //increment mem free cnt in sys stat table
+    [SYSTEM_STATUS_TABLE + 2] = [SYSTEM_STATUS_TABLE + 2] + 1;
+
+    //ptr 
+    alias ptr R4;
+    ptr = 0;
+    
+    //change status of all processes to ready
+    while(ptr < MAX_PROC_NUM) do
+      
+      //if wait_mem
+      if([PROCESS_TABLE + ptr * 16 + 4] == WAIT_MEM)then
+
+        //ready
+        [PROCESS_TABLE + ptr * 16 + 4] = READY;
+
+      endif; 
+      
+      ptr = ptr + 1;
+
+    endwhile;
+    
+  endif;
+
+  return;
+
+endif;
+
+//get code page
+if(functionNum == GET_CODE_PAGE)then
+
+  //re alias page no to block no
+  alias blockNum R2;
+
+  //ptr  
+  alias ptr R4;
+  ptr = 0;
+
+  alias count R5;
+  count = 0;
+
+
+  while(ptr < MAX_PROC_NUM)do
+    
+    count = 0;
+ 
+    while(count < 10)do
+
+      if(([DISK_MAP_TABLE + ptr * 10 + count] == blockNum))then
+        
+        //set page no as return val
+        R0 = [[PROCESS_TABLE + ptr * 16 + 14] + count * 2];      
+
+        return; 
+
+      endif;    
+
+      count = count + 1;
+
+    endwhile; 
+   
+    ptr = ptr + 1;
+
+  endwhile;  
+
+
+  alias ans R6;
+
+  //call get free page
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5);
+
+  //set function no
+  R1 = GET_FREE_PAGE;
+
+  //call memory manager
+  call MEMORY_MANAGER;
+
+  ans = R0;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5); 
+
+  //call load function in device manager
+
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6); 
+
+  //fun no
+  R1 = DISK_LOAD;
+
+  //disk no
+  R4 = R2;
+
+  //pid 
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+  
+  //page no to load into
+  R3 = ans;
+
+  //call device manager
+  call DEVICE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6);
+
+
+  //reset ans to R0
+  R0 = ans;
+ 
+  return;
+
+endif;
+
+
+//release block
+if(functionNum == RELEASE_BLOCK)then
+
+  //re alias R2 as blockno
+  alias blockNo R2;
+ 
+  //decrease in disk free list 
+  [DISK_FREE_LIST + blockNo] = [DISK_FREE_LIST + blockNo] - 1;
+
+  return;
+
+endif;
+
+//get free block
+if(functionNum == GET_FREE_BLOCK)then
+
+  //ptr 
+  alias ret_val R0;
+  ret_val = DISK_FREE_AREA;
+
+  //find free disk block
+  while(ret_val < DISK_SWAP_AREA)do
+
+    if([DISK_FREE_LIST + ret_val] == 0)then
+
+      [DISK_FREE_LIST + ret_val] = 1;
+
+      return;
+
+    endif;
+
+    ret_val = ret_val + 1;
+
+  endwhile;
+
+  //ret -1
+  ret_val = -1;
+
+  return;
+
+endif;
+
+//get swap block
+if(functionNum == GET_SWAP_BLOCK)then
+
+  //ret val
+  alias ret_val R0;
+  ret_val = DISK_SWAP_AREA;
+
+  //find free swap block
+  while(ret_val < DISK_SIZE)do
+
+    if([DISK_FREE_LIST + ret_val] == 0)then
+
+      [DISK_FREE_LIST + ret_val] = 1;
+
+      return;
+
+    endif;
+
+    ret_val = ret_val + 1;
+
+  endwhile; 
+
+  //ret -1
+  ret_val = -1;
+
+endif;

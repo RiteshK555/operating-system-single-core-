@@ -1,0 +1,198 @@
+//shutdown sys call
+
+//process table addr
+alias process_table_addr R1;
+process_table_addr = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+//save the sp in its process table
+[process_table_addr + 13] = SP;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//sys call no
+alias sys_call R2;
+sys_call = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+
+//switch sp to kernel stack
+SP = [process_table_addr + 11] * 512 - 1;
+
+//ret addr
+alias ret_addr R3;
+ret_addr = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512);
+
+//set mode flag in process table
+[process_table_addr + 9] = INT_SHUTDOWN;
+
+//shutdown sys call is invoked from shell process of root user
+if(([process_table_addr + 1] != 2) || ([process_table_addr + 3] != 1))then
+
+  //set ret value in user stack (invalid sem desc)
+  [ret_addr] = -1;
+
+  //reset mode flag
+  [process_table_addr + 9] = 0;
+
+  //reset sp to user stack
+  SP = userSP;
+
+  //ret to user mode
+  ireturn;
+
+endif;
+
+
+//pid
+alias currentPID R4;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+//kill all processes except idle, init and current process
+
+//multipush
+multipush(R0, R1, R2, R3, R4);
+
+//call process manager
+R1 = KILL_ALL;
+
+//currentpid
+R2 = currentPID;
+
+call PROCESS_MANAGER;
+
+//multipop
+multipop(R0, R1, R2, R3, R4);
+
+//save dirty buffers in disk
+
+//ptr
+alias ptr R5;
+ptr = 0;
+
+
+while(ptr < 4)do
+
+  //dirty bit
+  if([BUFFER_TABLE + ptr * 4 + 1] != 0)then
+
+    //store 
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5);
+
+    //fn no
+    R1 = DISK_STORE;
+
+    //pid
+    R2 = currentPID;
+
+    //page no
+    R3 = 71 + ptr;
+
+    //disk no
+    R4 = [BUFFER_TABLE + ptr * 4 + 0];
+
+    //device manager
+    call DEVICE_MANAGER;
+  
+    //multipop
+    multipop(R0, R1, R2, R3, R4, R5);
+ 
+  endif;
+
+  ptr = ptr + 1;
+
+endwhile;
+
+//store inode table and user table
+
+//multipush
+multipush(R0, R1, R2, R3, R4, R5);
+
+//fn no
+R1 = DISK_STORE;
+
+//pid
+R2 = currentPID;
+
+//page no
+R3 = 59;
+
+//block no
+R4 = 3;
+
+//call disk store
+call DEVICE_MANAGER;
+
+//multipop
+multipop(R0, R1, R2, R3, R4, R5);
+
+//multipush
+multipush(R0, R1, R2, R3, R4, R5);
+
+//fn no
+R1 = DISK_STORE;
+
+//pid
+R2 = currentPID;
+
+//page no
+R3 = 60;
+
+//block no
+R4 = 4;
+
+//call disk store
+call DEVICE_MANAGER;
+
+//multipop
+multipop(R0, R1, R2, R3, R4, R5);
+
+//store root file
+
+//multipush
+multipush(R0, R1, R2, R3, R4, R5);
+
+//fn no
+R1 = DISK_STORE;
+
+//pid
+R2 = currentPID;
+
+//page no
+R3 = 62;
+
+//block no
+R4 = 5;
+
+//call disk store
+call DEVICE_MANAGER;
+
+//multipop
+multipop(R0, R1, R2, R3, R4, R5);
+
+//store disk free list
+
+//multipush
+multipush(R0, R1, R2, R3, R4, R5);
+
+//fn no
+R1 = DISK_STORE;
+
+//pid
+R2 = currentPID;
+
+//page no
+R3 = 61;
+
+//block no
+R4 = 2;
+
+//call disk store
+call DEVICE_MANAGER;
+
+//multipop
+multipop(R0, R1, R2, R3, R4, R5);
+
+//halt
+halt;

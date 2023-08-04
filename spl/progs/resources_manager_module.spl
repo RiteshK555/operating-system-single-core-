@@ -1,0 +1,348 @@
+alias functionNum R1;
+alias currentPID R2;
+
+//acquire terminal
+if(functionNum == ACQUIRE_TERMINAL) then
+  while([TERMINAL_STATUS_TABLE] == 1)do
+    [PROCESS_TABLE + currentPID * 16 + 4] = WAIT_TERMINAL;
+    multipush(R0, R1, R2, R3);
+    call CONTEXT_SWITCH;
+    multipop(R0, R1, R2, R3);
+  endwhile;
+  [TERMINAL_STATUS_TABLE] = 1;
+  [TERMINAL_STATUS_TABLE + 1] = currentPID;
+  return;
+endif;
+
+alias ptr R4;
+ptr = 0;
+
+//release terminal
+if(functionNum == RELEASE_TERMINAL) then
+  if(currentPID == [TERMINAL_STATUS_TABLE + 1])then
+    [TERMINAL_STATUS_TABLE] = 0;
+    while(1==1)do
+      if(([PROCESS_TABLE + ptr * 16 + 4] < 1) || ([PROCESS_TABLE + ptr * 16 + 4] > 12))then
+        break;
+      endif;
+      if([PROCESS_TABLE + ptr * 16 + 4] == WAIT_TERMINAL)then
+        [PROCESS_TABLE + ptr * 16 + 4] = READY;
+      endif;
+      ptr = ptr + 1;
+    endwhile;
+    R0 = 0; 
+    return;
+  endif; 
+  R0 = -1;
+  return;
+endif;
+
+//acquire disk
+if(functionNum == ACQUIRE_DISK) then
+  
+  //wait until disk is ready
+  while([DISK_STATUS_TABLE + 0] == 1)do
+
+    //set current process to wait disk
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 4] = WAIT_DISK;
+
+    //multipush
+    multipush(R0, R1, R2); 
+
+    //schedule another process
+    call CONTEXT_SWITCH;
+
+    //multipop
+    multipop(R0, R1, R2);
+
+  endwhile;
+
+  //mark in disk status table
+  [DISK_STATUS_TABLE + 0] = 1;
+
+  //set pid in disk status table
+  [DISK_STATUS_TABLE + 4] = currentPID;
+
+  return;
+
+endif;
+
+//acquire semaphore
+if(functionNum == ACQUIRE_SEMAPHORE)then
+
+  //ptr
+  alias ptr R3;
+  ptr = 0;
+
+  while(ptr < MAX_SEM_COUNT)do
+
+    if([SEMAPHORE_TABLE + ptr * 4 + 1] == 0)then
+
+      break;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+  
+  if(ptr == MAX_SEM_COUNT)then
+
+    //set ret value
+    R0 = -1;
+    
+    return;
+
+  endif;
+
+  //set num of processes using sem as 1
+  [SEMAPHORE_TABLE + ptr * 4 + 1] = 1;
+
+  //set locking pid as -1
+  [SEMAPHORE_TABLE + ptr * 4 + 0] = -1;
+
+  //ret index
+  R0 = ptr;
+  
+  return;
+
+endif;
+
+//release semaphore
+if(functionNum == RELEASE_SEMAPHORE)then
+
+  //sem descriptor
+  alias sem_desc R3;
+
+  //sem index
+  alias sem_index R5;
+  sem_index = [[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 + RESOURCE_TABLE_OFFSET + sem_desc * 2 + 1];  
+
+  //if sem is locked by current process
+  if([SEMAPHORE_TABLE + sem_index * 4 + 0] == currentPID)then
+
+    //set locking pid to -1
+    [SEMAPHORE_TABLE + sem_index * 4 + 0] = -1;
+
+    //ptr
+    alias ptr R4;
+    ptr = 0;
+
+    while(ptr < MAX_PROC_NUM)do
+
+      //set ready for all processes blocked by this sem
+      if(([PROCESS_TABLE + ptr * 16 + 4] == WAIT_SEMAPHORE) && ([PROCESS_TABLE + ptr * 16 + 5] == sem_index))then
+
+        //set ready
+        [PROCESS_TABLE + ptr * 16 + 4] = READY;
+
+        //set -1
+        [PROCESS_TABLE + ptr * 16 + 5] = -1;
+
+      endif;
+
+      ptr = ptr + 1;
+
+    endwhile;
+
+  endif; 
+ 
+  //decrease process count in sem table
+  [SEMAPHORE_TABLE + sem_index * 4 + 1] = [SEMAPHORE_TABLE + sem_index * 4 + 1] - 1;
+
+endif;
+
+//acquire inode 
+if(functionNum == ACQUIRE_INODE)then
+
+  //inode index
+  alias inode_index R3;
+
+  //while the file is locked 
+  while([FILE_STATUS_TABLE + inode_index * 4 + 0] != -1)do
+
+    //set state
+    [PROCESS_TABLE + currentPID * 16 + 4] = WAIT_FILE;
+
+    //set inode index
+    [PROCESS_TABLE + currentPID * 16 + 5] = inode_index;
+
+    //multipush
+    multipush(R0, R1, R2, R3);
+    
+    //context switch
+    call CONTEXT_SWITCH;
+
+    //multipop
+    multipop(R0, R1, R2, R3);
+
+  endwhile; 
+
+  //if file doesn't exist
+  if([INODE_TABLE + inode_index * 16 + 1] == -1)then
+
+    //ret -1
+    R0 = -1;
+
+    return;
+
+  endif; 
+  
+  //lock the file
+  [FILE_STATUS_TABLE + inode_index * 4 + 0] = currentPID;
+
+  //ret 0
+  R0 = 0;
+  
+  return; 
+
+endif;
+
+//release inode
+if(functionNum == RELEASE_INODE)then
+
+  //inode index
+  alias inode_index R3;
+  
+  //check if current process locked the file  
+  if(currentPID != [FILE_STATUS_TABLE + inode_index * 4 + 0])then
+
+    //ret -1;
+    R0 = -1;
+
+    return;
+
+  endif;
+
+  //free the file
+  [FILE_STATUS_TABLE + inode_index * 4 + 0] = -1;
+
+  //set ready to all waiting processes
+
+  //ptr
+  alias ptr R4;
+  ptr = 0;
+
+  while(ptr < MAX_PROC_NUM)do
+
+    if(([PROCESS_TABLE + ptr * 16 + 4] == WAIT_FILE) && ([PROCESS_TABLE + ptr * 16 + 5] == inode_index))then
+
+      //reset state
+      [PROCESS_TABLE + ptr * 16 + 4] = READY;
+
+      //reset inode index
+      [PROCESS_TABLE + ptr * 16 + 5] = -1;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  //ret 0
+  R0 = 0;
+
+  return;
+
+endif;
+
+//acquire buffer
+if(functionNum == ACQUIRE_BUFFER)then
+
+  //buffer no
+  alias buffer_number R3;
+
+  //process table addr
+  alias process_table_addr R4;
+  process_table_addr = PROCESS_TABLE + 16 * currentPID;
+
+  //buffer table addr
+  alias buffer_table_addr R5;
+  buffer_table_addr = BUFFER_TABLE + 4 * buffer_number;
+  
+  //buffer is locked
+  while([buffer_table_addr + 2] != -1)do
+
+    //set state
+    [process_table_addr + 4] = WAIT_BUFFER;
+
+    //set buffer number
+    [process_table_addr + 5] = buffer_number;
+
+    //context switch
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5);
+
+    //call context switch
+    call CONTEXT_SWITCH;
+
+    //multipop
+    multipop(R0, R1, R2, R3, R4, R5);
+
+  endwhile;
+
+  //buffer is free
+
+  //set pid
+  [buffer_table_addr + 2] = currentPID;
+  
+  return;
+
+endif;
+
+//release buffer
+if(functionNum == RELEASE_BUFFER)then
+
+  //buffer no
+  alias buffer_number R3;
+
+  //process table addr
+  alias process_table_addr R4;
+  process_table_addr = PROCESS_TABLE + 16 * currentPID;
+
+  //buffer table addr
+  alias buffer_table_addr R5;
+  buffer_table_addr = BUFFER_TABLE + 4 * buffer_number;
+
+  //check pid
+  if(currentPID != [buffer_table_addr + 2])then
+
+    //ret -1
+    R0 = -1;
+
+    return;
+
+  endif;
+  
+  //free buffer table
+  [buffer_table_addr + 2] = -1;
+
+  //ptr
+  alias ptr R5;
+  ptr = 0;
+
+  while(ptr < MAX_PROC_NUM)do
+
+    if(([PROCESS_TABLE + 16 * ptr + 4] == WAIT_BUFFER) && ([PROCESS_TABLE + 16 * ptr + 5] == buffer_number))then
+
+      //set ready
+      [PROCESS_TABLE + 16 * ptr + 4] = READY;
+
+      //set buffer number
+      [PROCESS_TABLE + 16 * ptr + 5] = -1;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  //ret 0
+  R0 = 0;
+
+  return;
+
+endif;
+
+return;

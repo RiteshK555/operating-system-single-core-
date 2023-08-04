@@ -1,0 +1,295 @@
+//read sys call
+
+//process table addr
+alias process_table_addr R1;
+process_table_addr = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+//set mode flag as read sys call
+[process_table_addr + 9] = INT_READ;
+
+//save sp 
+alias userSP R0;
+userSP = SP;
+
+
+//save the sp in its process table
+[process_table_addr + 13] = SP;
+
+//set stack pointer to point to kernel stack
+SP = [process_table_addr + 11] * 512 - 1;
+
+//convert sp-4 to real addr
+alias fileDescriptor R3;
+fileDescriptor=[[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP -4) % 512)];
+
+//physical addr
+alias physicalAddrRetVal R4;
+physicalAddrRetVal = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512);
+
+
+if (fileDescriptor == -1)then
+  alias word R5;
+  word = [[PTBR + 2 * ((userSP - 3) / 512)] * 512 + ((userSP - 3) % 512)];
+  multipush(R0, R1, R2, R3, R4, R5);
+  R1 = TERMINAL_READ;
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+  R3 = word;
+  call DEVICE_MANAGER;
+  multipop(R0, R1, R2, R3, R4, R5);
+  [physicalAddrRetVal] = 0;
+else
+
+  if((fileDescriptor < 0) || (fileDescriptor > 7))then
+
+    //physical addr
+    [physicalAddrRetVal] = -1;
+
+    //mode flag
+    [process_table_addr + 9] = 0;
+
+    //reset stack pointer
+    SP = userSP;
+   
+    ireturn;
+
+  else 
+
+    //pid
+    alias currentPID R5;
+    currentPID = [SYSTEM_STATUS_TABLE + 1];
+ 
+    //user area page no
+    alias user_area_page R6;
+    user_area_page = [process_table_addr + 11];
+
+    //resource addr
+    alias resource_table_addr R7;
+    resource_table_addr = user_area_page * 512 + RESOURCE_TABLE_OFFSET + fileDescriptor * 2;
+
+    if([resource_table_addr + 0] != FILE)then
+
+      //physical addr
+      [physicalAddrRetVal] = -1;
+
+      //mode flag
+      [process_table_addr + 9] = 0;
+
+      //reset stack pointer
+      SP = userSP;
+
+      ireturn;
+
+    endif; 
+  
+    //inode index
+    alias inode_index R8;
+    inode_index = [OPEN_FILE_TABLE + [resource_table_addr + 1] * 4 + 0];
+
+    //aqcuire inode
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8);
+
+    //call resource manager
+
+    //fn no
+    R1 = ACQUIRE_INODE;
+
+    //pid
+    R2 = currentPID;
+
+    //inode index
+    R3 = inode_index;
+
+    call RESOURCE_MANAGER;
+
+    if(R0 < 0)then
+
+      //physical addr
+      [physicalAddrRetVal] = -1;
+
+      //mode flag
+      [process_table_addr + 9] = 0;
+
+      //reset stack pointer
+      SP = userSP;
+
+      ireturn;
+    
+    endif;
+
+    //multipop
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8);
+
+    //open file addr
+    alias open_file_addr R9;
+    open_file_addr = OPEN_FILE_TABLE + 4 * [resource_table_addr + 1];
+
+    //logical addr
+    alias logical_addr R10;
+    logical_addr = [[PTBR + 2 * ((userSP - 3) / 512)] * 512 + ((userSP - 3) % 512)];
+
+    //physical addr
+    alias phy_addr R11;
+    phy_addr = [PTBR + 2 * (logical_addr / 512)] * 512 + (logical_addr % 512);
+
+    //lseek
+    alias lseek R12;
+    lseek = open_file_addr + 2;
+
+    //inode addr
+    alias inode_addr R13;
+    inode_addr = INODE_TABLE + 16 * inode_index;
+
+    if(inode_index == INODE_ROOT)then
+     
+      //lseek = root file size 
+      if([lseek] == 480)then
+
+        //release inode
+
+        //multipush
+        multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+        //call resource manager
+
+        //fn no
+        R1 = RELEASE_INODE;
+
+        //pid
+        R2 = currentPID;
+
+        //inode index
+        R3 = inode_index;
+
+        call RESOURCE_MANAGER;
+        
+        //multipop
+        multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+        //ret value
+        [physicalAddrRetVal] = -2;
+
+        //mode flag
+        [process_table_addr + 9] = 0;
+
+        //reset stack pointer
+        SP = userSP;
+
+        ireturn;
+     
+      endif; 
+
+      //read the word into given addr
+      [phy_addr] = [ROOT_FILE + [lseek]]; 
+       
+      //increment lseek 
+      [lseek] = [lseek] + 1;
+ 
+    else 
+
+      if([lseek] == [inode_addr + 2])then
+
+        //release inode
+
+        //multipush
+        multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+        //call resource manager
+
+        //fn no
+        R1 = RELEASE_INODE;
+
+        //pid
+        R2 = currentPID;
+
+        //inode index
+        R3 = inode_index;
+
+        call RESOURCE_MANAGER;
+        
+        //multipop
+        multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+        //ret value
+        [physicalAddrRetVal] = -2;
+
+        //mode flag
+        [process_table_addr + 9] = 0;
+
+        //reset stack pointer
+        SP = userSP;
+
+        ireturn;
+
+      endif;
+
+      //buffer read
+      
+      //multipush 
+      multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+      //fn no
+      R1 = BUFFERED_READ;
+
+      //disk block no
+      R2 = [inode_addr + 8 + ([lseek] / 512)];
+
+      //offset val
+      R3 = ([lseek] % 512);
+
+      //mem addr to be written
+      R4 = phy_addr;
+
+      //call file manager
+      call FILE_MANAGER;
+
+      //multipop
+      multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+      //increment lseek
+      [lseek] = [lseek] + 1;
+
+    endif;
+
+    //release inode
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+    //call resource manager
+
+    //fn no
+    R1 = RELEASE_INODE;
+
+    //pid
+    R2 = currentPID;
+
+    //inode index
+    R3 = inode_index;
+
+    call RESOURCE_MANAGER;
+
+    //multipop
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13);
+
+    //ret value
+    [physicalAddrRetVal] = 0;
+
+    //mode flag
+    [process_table_addr + 9] = 0;
+
+    //reset stack pointer
+    SP = userSP;
+
+    ireturn;
+
+  endif;
+
+endif;
+
+[process_table_addr + 9] = 0;
+
+SP = userSP;
+
+ireturn;

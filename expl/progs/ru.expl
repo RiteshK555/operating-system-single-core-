@@ -1,0 +1,48 @@
+int main()
+{
+decl
+
+  int temp, ptr, fileDesc;
+
+  string username, tempUsername, fileName;
+
+enddecl
+
+begin
+
+  //input username 
+  temp = exposcall("Read", -1, username);
+
+  //open root file
+  fileDesc = exposcall("Open", "root");
+
+  ptr = 0;
+
+  while(ptr >= 0)do
+
+    //get file name
+    ptr = exposcall("Read", fileDesc, fileName);
+
+    //seek to username pos
+    temp = exposcall("Seek", fileDesc, 2);
+
+    //get username
+    temp = exposcall("Read", fileDesc, tempUsername); 
+
+    if((fileName != "-1") && (username == tempUsername))then
+
+      temp = exposcall("Delete", fileName);
+
+    endif;
+
+    //seek forward
+    temp = exposcall("Seek", fileDesc, 4);
+
+  endwhile;
+
+  return 0;
+
+end
+
+}
+

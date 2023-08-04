@@ -1,0 +1,310 @@
+//int 4 handler (create and delete)
+
+//save the sp in its process table
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//sys call no
+alias sys_call R1;
+sys_call = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+
+//switch sp to kernel stack
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 - 1;
+
+//ret addr
+alias ret_addr R5;
+ret_addr = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512);
+
+
+//create sys call
+if(sys_call == INT_CREATE)then
+  
+  //set mode flag to int create
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_CREATE;
+
+  //get name of the file
+  alias file_name R2;
+  file_name = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];  
+
+  //get permissions of the file
+  alias file_permissions R3;
+  file_permissions = [[PTBR + 2 * ((userSP - 3) / 512)] * 512 + ((userSP - 3) % 512)];
+
+
+  //ptr 
+  alias ptr R4;
+  ptr = 0; 
+
+  //check if file is already present in inode table
+  while(ptr < MAX_FILE_NUM)do
+
+    //file name is unique
+    if(([INODE_TABLE + 16 * ptr + 1] != -1) && ([INODE_TABLE + 16 * ptr + 1] == file_name))then
+
+      //set ret value in user stack (file is already present)
+      [ret_addr] = 0;
+
+      goto label_ireturn;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+
+  //inode index
+  alias inode_index R5;
+  inode_index = 0;
+
+  while(inode_index < MAX_FILE_NUM)do
+
+    if([INODE_TABLE + 16 * inode_index + 1] == -1)then
+
+      break;
+
+    endif;
+
+    inode_index = inode_index + 1;
+
+  endwhile;
+
+  if(inode_index == MAX_FILE_NUM)then
+
+    //set ret value in user stack (no space left in disk)
+    [ret_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+
+  //set file name
+  [INODE_TABLE + inode_index * 16 + 1] = file_name;
+
+  //set file size
+  [INODE_TABLE + inode_index * 16 + 2] = 0;
+
+  //set file type
+  [INODE_TABLE + inode_index * 16 + 0] = DATA;
+
+  //set data blocks
+  ptr = 8;
+  while(ptr < 12)do
+
+    [INODE_TABLE + inode_index * 16 + ptr] = -1;
+
+    ptr = ptr + 1;
+
+  endwhile; 
+
+
+  //set user id 
+  [INODE_TABLE + inode_index * 16 + 3] = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 3];
+
+  //set permissions
+  [INODE_TABLE + inode_index * 16 + 4] = file_permissions; 
+
+  //set meta data in root file too
+
+  //file name
+  [ROOT_FILE + inode_index * 8 + 0] = file_name;
+
+  //file size
+  [ROOT_FILE + inode_index * 8 + 1] = 0;
+
+  //file type
+  [ROOT_FILE + inode_index * 8 + 2] = DATA;
+
+  //get user name and set in root file
+  [ROOT_FILE + inode_index * 8 + 3] = [USER_TABLE + [INODE_TABLE + inode_index * 16 + 3] * 2 + 0];
+
+  //permissions
+  [ROOT_FILE + inode_index * 8 + 4] = file_permissions;
+
+  //set ret value in user stack (no space left in disk)
+  [ret_addr] = 0;
+
+
+  goto label_ireturn;
+
+endif;
+
+
+//del sys call
+if(sys_call == INT_DELETE)then
+
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_DELETE;
+
+  //get name of the file
+  alias file_name R2;
+  file_name = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  //inode index
+  alias inode_index R3;
+  inode_index = 0;
+
+  //find file index in inode table
+  while(inode_index < MAX_FILE_NUM)do
+
+    //check file name
+    if([INODE_TABLE + inode_index * 16 + 1] == file_name)then
+    
+      break;    
+
+    endif;
+
+    inode_index = inode_index + 1;
+
+  endwhile; 
+
+  //if file not present
+  if(inode_index == MAX_FILE_NUM)then
+
+    //set ret value in user stack (success)
+    [ret_addr] = 0;
+
+    goto label_ireturn;
+
+  endif;
+
+  //if file is data file
+  if([INODE_TABLE + inode_index * 16 + 0] != DATA)then
+
+    //set ret value in user stack (failure)
+    [ret_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //exclusive permission
+  if([INODE_TABLE + inode_index * 16 + 4] == EXCLUSIVE)then
+
+    if([PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 3] != [INODE_TABLE + inode_index * 16 + 3])then
+
+      //set ret value in user stack (failure)
+      [ret_addr] = -1;
+
+      goto label_ireturn;
+
+    endif; 
+
+  endif;
+
+
+  //acquire file
+  
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5);
+
+  //fn no
+  R1 = ACQUIRE_INODE;
+
+  //set pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //set inode index
+  R3 = inode_index;
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5);
+
+
+  //check if file is open
+  if([FILE_STATUS_TABLE + inode_index * 4 + 1] != -1)then
+
+    //set ret value in user stack (failure)
+    [ret_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+
+  //ptr 
+  alias ptr R4;
+  ptr = 8;
+  
+  while(ptr < 12)do
+
+    if([INODE_TABLE + inode_index * 16 + ptr] != -1)then
+     
+      //reset dirty bit
+      [BUFFER_TABLE + ([INODE_TABLE + inode_index * 16 + ptr] % MAX_BUFFER) * 4 + 1] = 0;
+
+      //release block
+
+      //multipush
+      multipush(R0, R1, R2, R3, R4, R5);
+
+      //fn no
+      R1 = RELEASE_BLOCK;
+
+      //block no
+      R2 = [INODE_TABLE + inode_index * 16 + ptr];
+
+      //call mem manager
+      call MEMORY_MANAGER;
+
+      //multipop
+      multipop(R0, R1, R2, R3, R4, R5);
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  //invalidate inode file
+  [INODE_TABLE + inode_index * 16 + 1] = -1;
+
+  //invalidate root file
+  [ROOT_FILE + inode_index * 8 + 0] = -1;
+
+  //release inode
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5);
+
+  //fn no
+  R1 = RELEASE_INODE;
+
+  //set pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //set inode index
+  R3 = inode_index;
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5);
+
+  //set ret value in user stack (success)
+  [ret_addr] = 0;
+
+  goto label_ireturn;
+
+endif;
+
+label_ireturn:
+
+//reset mode flag
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+//switch back
+SP = userSP;
+
+//ret to user mode
+ireturn;
+

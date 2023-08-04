@@ -1,0 +1,548 @@
+//file manager module (open and close file)
+
+//fn no
+alias functionNum R1;
+
+//open file
+if(functionNum == OPEN)then
+
+  //file name
+  alias file_name R2;
+
+  //find inode index of file
+ 
+  //inode index
+  alias inode_index R3;
+  inode_index = 0;
+
+  //ret value
+  alias ret_val R10;
+
+  while(inode_index < MAX_FILE_NUM)do
+
+    if([INODE_TABLE + inode_index * 16 + 1] == file_name)then
+
+      break; 
+
+    endif;
+
+    inode_index = inode_index + 1;
+
+  endwhile;
+
+  //if table isn't free
+  if(inode_index == MAX_PROC_NUM)then
+
+    //set -1
+    R0 = -1;
+
+    return;
+
+  endif;
+
+  //acquire inode
+
+  //multipush
+  multipush(R0, R1, R2, R3);
+
+  //call resource manager
+   
+  //fn no
+  R1 = ACQUIRE_INODE;
+
+  //pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //inode index
+  R3 = inode_index; 
+
+  //call resource manager
+  call RESOURCE_MANAGER; 
+
+  //if aqcuire inode fails
+  if(R0 != 0)then
+
+    //set -1
+    R0 = -1;
+
+    return;
+
+  endif;
+
+  ret_val = R0;
+
+  //multipop
+  multipop(R0, R1, R2, R3); 
+
+  //inode file addr
+  alias inode_file_addr R4;
+  inode_file_addr = INODE_TABLE + inode_index * 16;
+
+  //if file is of type exec
+  if([inode_file_addr + 0] == EXEC)then
+
+    //release inode
+    
+    //multipush
+    //multipush(R0, R1, R2, R3, R4);
+
+    call label_release_inode;
+
+    //multipop
+    //multipop(R0, R1, R2, R3, R4);
+
+    //ret -1
+    R0 = -1;
+
+    return;    
+
+  endif;
+
+  //open file table index
+  alias open_file_table_index R5;
+  open_file_table_index = 0;
+
+  while(open_file_table_index < MAX_OPENFILE_NUM)do
+
+    //free index
+    if([OPEN_FILE_TABLE + open_file_table_index * 4 + 0] == -1)then
+
+      break;
+
+    endif;
+
+    open_file_table_index = open_file_table_index + 1;
+
+  endwhile;
+  
+  //open file table is full
+  if(open_file_table_index == MAX_OPENFILE_NUM)then
+
+    //release inode
+
+    //multipush
+    //multipush(R0, R1, R2, R3, R4, R5);
+
+    call label_release_inode;
+
+    //multipop
+    //multipop(R0, R1, R2, R3, R4, R5);
+
+    //ret -2
+    R0 = -2;
+
+    return;
+
+  endif; 
+
+  //open file table base file addr
+  alias open_file_table_file_addr R6;
+  open_file_table_file_addr = OPEN_FILE_TABLE + open_file_table_index * 4;
+
+  //if file name is root
+  if([inode_file_addr + 0] == ROOT)then
+
+    //set inode index
+    [open_file_table_file_addr + 0] = INODE_ROOT;
+
+  else
+
+    //set inode index
+    [open_file_table_file_addr + 0] = inode_index;
+
+    //increment in file status table    
+    if([FILE_STATUS_TABLE + inode_index * 4 + 1] == -1)then
+
+      [FILE_STATUS_TABLE + inode_index * 4 + 1] = 1;
+      
+
+    else
+
+      [FILE_STATUS_TABLE + inode_index * 4 + 1] = [FILE_STATUS_TABLE + inode_index * 4 + 1] + 1;
+
+    endif;
+
+  endif;
+
+
+  //set open file instance count
+  [open_file_table_file_addr + 1] = 1;
+
+  //set lseek to 0
+  [open_file_table_file_addr + 2] = 0;
+
+  //unlock file
+
+  call label_release_inode;
+
+  //return open file table index
+  R0 = open_file_table_index;
+
+  return;
+
+  label_release_inode:
+
+  multipush(R0, R1, R2, R3, R4, R5, R6);
+
+  //call resource manager
+  
+  //fn no
+  R1 = RELEASE_INODE;
+
+  //pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //inode index
+  R3 = inode_index;
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+
+  multipop(R0, R1, R2, R3, R4, R5, R6);
+
+  return; 
+
+endif;
+
+//close file
+if(functionNum == CLOSE)then
+
+  //open file table index
+  alias open_file_table_index R2;
+  
+  //decrement open instance count in open file table entry
+  
+  //open file table file addr
+  alias open_file_table_file_addr R3;
+  open_file_table_file_addr = OPEN_FILE_TABLE + 4 * open_file_table_index;
+
+  //inode index
+  alias inode_index R4;
+  inode_index = [open_file_table_file_addr + 0];
+
+  //decrement open instance count
+  [open_file_table_file_addr + 1] = [open_file_table_file_addr] - 1;
+
+  //inode file addr
+  alias inode_file_addr R5;
+  inode_file_addr = INODE_TABLE + 16 * inode_index;
+
+  //file status table addr
+  alias file_status_table R6;
+  file_status_table = FILE_STATUS_TABLE + 16 * inode_index; 
+ 
+  //if open instance count = 0
+  if([open_file_table_file_addr + 1] == 0)then
+
+    //reset inode index
+    [open_file_table_file_addr + 0] = -1;
+
+    //reset open instance count
+    [open_file_table_file_addr + 1] = -1;
+
+    //reset lseek
+    [open_file_table_file_addr + 2] = -1;
+
+    //if file is not root decrement file open count
+    if([inode_file_addr + 0] != ROOT)then
+
+      [file_status_table + 1] = [file_status_table + 1] - 1;
+
+    endif;
+
+    if([file_status_table + 1] == 0)then
+
+      [file_status_table + 1] = -1;
+
+    endif;
+
+  endif;
+
+  return;
+
+endif;
+
+//buffer read
+
+//multipop
+if(functionNum == BUFFERED_READ)then
+
+  //disk block no
+  alias disk_block_number R2;
+
+  //offset val
+  alias offset_val R3;
+
+  //physical mem addr
+  alias phy_mem_addr R4;
+
+  //find buffer no
+  alias buffer_number R5;
+  buffer_number = disk_block_number % MAX_BUFFER;
+
+  //pid
+  alias currentPID R6;
+  currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+  //aqcuire buffer
+  
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6);
+
+  //call resource manager
+  
+  //fn no
+  R1 = ACQUIRE_BUFFER;
+
+  //pid
+  R2 = currentPID;
+
+  //buffer no
+  R3 = buffer_number;
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6); 
+
+  //buffer addr
+  alias buffer_addr R7;
+  buffer_addr = BUFFER_TABLE + buffer_number * 4;
+
+  //if other block is present
+  if(([buffer_addr + 0] != disk_block_number))then
+
+    if([buffer_addr + 1] != 0)then
+
+      //write back the contents 
+
+      //store
+      
+      //multipush
+      multipush(R0, R1, R2, R3, R4, R5, R6, R7);
+
+      //fn no
+      R1 = DISK_STORE;
+
+      //disk block no  
+      R4 = [buffer_addr + 0];
+
+      //pid
+      R2 = currentPID;
+
+      //page no
+      R3 = 71 + buffer_number;
+
+      //call device manager
+      call DEVICE_MANAGER;
+
+      //multipop
+      multipop(R0, R1, R2, R3, R4, R5, R6, R7);
+
+      //mark buffer as clean
+      [buffer_addr + 1] = 0;
+
+    endif;
+ 
+    //load the given disk block into buffer
+    
+    //load
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7);
+
+    //fn no
+    R1 = DISK_LOAD;
+    
+    //disk block no
+    R4 = disk_block_number;
+
+    //pid
+    R2 = currentPID;
+  
+    //page no
+    R3 = 71 + buffer_number;
+
+    //call device manager
+    call DEVICE_MANAGER;
+
+    //multipop
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7);
+
+    //set disk block in buffer table
+    [buffer_addr + 0] = disk_block_number;
+ 
+
+  endif;
+
+  //copy contents to physical addr
+  [phy_mem_addr] = [ (71 + buffer_number) * 512 + offset_val];
+
+  //release buffer
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6, R7);
+
+  //call resource manager
+
+  //fn no
+  R1 = RELEASE_BUFFER;
+
+  //pid
+  R2 = currentPID;
+
+  //buffer no
+  R3 = buffer_number;
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6, R7);
+  
+  return; 
+
+endif;
+
+//buffer write
+
+if(functionNum == BUFFERED_WRITE)then
+
+  //disk block no
+  alias disk_block_number R2;
+
+  //offset val
+  alias offset_val R3;
+
+  //word
+  alias word R4;
+
+
+  //buffer number
+  alias buffer_number R5;
+  buffer_number = (disk_block_number % 4);
+
+  //buffer entry addr
+  alias buffer_entry_addr R6;
+  buffer_entry_addr = BUFFER_TABLE + buffer_number * 4;
+
+
+
+  //acquire buffer
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6);
+
+  //fn no
+  R1 = ACQUIRE_BUFFER;
+
+  //pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //buffer number
+  R3 = buffer_number;
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+  
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6);
+
+
+  //buffer contains different disk block
+  if([buffer_entry_addr + 0] != disk_block_number)then
+
+    //if buffer is dirty
+    if([buffer_entry_addr + 1] != 0)then
+
+      //store back the contents
+      
+      //multipush
+      multipush(R0, R1, R2, R3, R4, R5, R6);
+
+      //call disk store
+      
+      //fn no
+      R1 = DISK_STORE;
+
+      //pid
+      R2 = [SYSTEM_STATUS_TABLE + 1];
+
+      //block no
+      R4 = [buffer_entry_addr];
+
+      //page no
+      R3 = 71 + buffer_number;
+
+      //call device manager
+      call DEVICE_MANAGER;
+
+      //multipop
+      multipop(R0, R1, R2, R3, R4, R5, R6);
+
+    endif;
+
+    //load the given disk block into buffer
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5, R6);
+
+    //call disk store
+
+    //fn no
+    R1 = DISK_LOAD;
+
+    //block no
+    R4 = disk_block_number;
+
+    //pid
+    R2 = [SYSTEM_STATUS_TABLE + 1];
+
+    //page no
+    R3 = 71 + buffer_number;
+
+    //call device manager
+    call DEVICE_MANAGER;
+
+    //multipop
+    multipop(R0, R1, R2, R3, R4, R5, R6);
+
+    //set disk block in buffer table
+    [buffer_entry_addr + 0] = disk_block_number;
+
+  endif;
+
+  //save given word in addr
+  [(71 + buffer_number) * 512 + offset_val] = word;
+
+  //mark dirty
+  [buffer_entry_addr + 1] = 1;
+
+  //release buffer
+
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6);
+
+  //fn no
+  R1 = RELEASE_BUFFER;
+
+  //pid
+  R2 = [SYSTEM_STATUS_TABLE + 1];
+
+  //buffer number
+  R3 = buffer_number;
+
+  //call resource manager
+  call RESOURCE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6);
+
+  return;
+
+endif;
+
+
+return;

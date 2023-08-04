@@ -1,0 +1,115 @@
+//set the stack pointer 
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1] * 16) + 13] = SP; 
+
+//set sp to kernel stack
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1] * 16) + 11] * 512 - 1;
+
+//backup
+backup;
+
+alias ptr R1;
+
+//paging
+if([SYSTEM_STATUS_TABLE + 5] != 0)then
+
+  if(([SYSTEM_STATUS_TABLE + 1] == 15) && ([SYSTEM_STATUS_TABLE + 5] == SWAP_OUT))then
+
+    //call swap out
+
+    //fn no
+    R1 = SWAP_OUT; 
+
+    //call pager module
+    call PAGER_MODULE;
+
+  else
+
+    if(([SYSTEM_STATUS_TABLE + 1] == 15) && ([SYSTEM_STATUS_TABLE + 5] == SWAP_IN))then
+
+      //call swap in
+
+      //fn no
+      R1 = SWAP_IN;
+
+      //call pager module
+      call PAGER_MODULE;
+
+    endif; 
+
+  endif;
+
+else 
+
+  if([SYSTEM_STATUS_TABLE + 2] < MEM_LOW)then
+
+    //set paging status to swap out
+    [SYSTEM_STATUS_TABLE + 5] = SWAP_OUT;
+
+  else 
+
+    if([SYSTEM_STATUS_TABLE + 4] > 0)then
+
+      //check for swap in
+      ptr = 0;
+     
+      if([SYSTEM_STATUS_TABLE + 2] > MEM_HIGH)then
+
+        //set paging status
+        [SYSTEM_STATUS_TABLE + 5] = SWAP_IN;
+
+      endif; 
+ 
+      while(ptr < MAX_PROC_NUM)do
+
+        //check tick
+        if([PROCESS_TABLE + ptr * 16] > MAX_TICK)then
+
+          [SYSTEM_STATUS_TABLE + 5] = SWAP_IN;
+
+        endif;
+
+        ptr = ptr + 1;
+
+      endwhile;
+
+    endif;
+
+  endif;
+
+endif;
+
+
+
+//set the state to ready
+[PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1] * 16) + 4] = READY;
+
+ptr = 0;
+
+//increase tick
+while(ptr < MAX_PROC_NUM)do
+
+  if(([PROCESS_TABLE + ptr * 16 + 1] < 0) || ([PROCESS_TABLE + ptr * 16 + 1] > 15))then
+
+    ptr = ptr + 1;
+
+    continue;
+
+  endif;
+
+  [PROCESS_TABLE + ptr * 16 + 0] = [PROCESS_TABLE + ptr * 16 + 0] + 1;
+
+  ptr = ptr + 1;
+
+endwhile;
+
+call CONTEXT_SWITCH;
+
+
+//restore the reg vals from kernel stack
+restore;
+
+//change SP to user stack
+SP = [PROCESS_TABLE + ([SYSTEM_STATUS_TABLE+1]) * 16 + 13];
+
+
+ireturn;

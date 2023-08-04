@@ -1,0 +1,301 @@
+//fork system call
+
+//set mode flag for fork system call
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_FORK;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//save the sp in its process table
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//set stack pointer to point to kernel stack
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 - 1;
+
+
+//return value
+alias childPID R1;
+
+//call fn get pcb entry
+
+//multipush
+multipush(R0);
+
+//set fn no
+R1 = GET_PCB_ENTRY;
+
+//call process manager
+call PROCESS_MANAGER;
+
+childPID = R0;  
+
+//multipop
+multipop(R0);
+
+if(childPID == -1)then
+
+  //set return val in stack
+  [([PTBR + 2 * ((userSP - 1) / 512)] * 512) + ((userSP - 1) % 512)] = -1;
+
+  goto label_ireturn;
+
+endif;
+
+//ptr
+alias ptr R2;
+ptr = 2;
+
+//parent process addr
+alias parent_process_addr R3;
+parent_process_addr = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+//child process addr
+alias child_process_addr R4;
+child_process_addr = PROCESS_TABLE + childPID * 16;
+
+
+//child page table
+alias child_ptbr R5;
+child_ptbr = PAGE_TABLE_BASE + 20 * childPID;
+
+//parent user area page
+alias parent_user_area R6;
+parent_user_area = [parent_process_addr + 11];
+
+//allocate mem for heap pages for parent process
+while(ptr < 4)do
+
+  //allocate memory for heap pages
+  if(([PTBR + 2 * ptr] < 0) || ([PTBR + 2 * ptr] > 127))then
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5, R6);
+
+    //get free page
+
+    call label_memory_manager;
+
+    //multipop
+    multipop(R1, R2, R3, R4, R5, R6);
+
+    //set heap page
+    [PTBR + 2 * ptr] = R0;
+ 
+    //multipop
+    multipop(R0);
+ 
+    //set permissions
+    [PTBR + 2 * ptr + 1] = "0110";
+
+  endif;
+
+  ptr = ptr + 1;
+
+endwhile;
+
+//initialize process table for child process
+
+
+//set userid of parent to child
+[child_process_addr + 3] = [parent_process_addr + 3];
+
+//copy swap field
+[child_process_addr  + 6] = [parent_process_addr + 6];
+
+//copy user area swap status
+[child_process_addr  + 10] = [parent_process_addr + 10];
+
+//same inode index
+[child_process_addr  + 7] = [parent_process_addr  + 7];
+
+//same user stack pointer
+[child_process_addr  + 13] = [parent_process_addr + 13];
+
+//set mode flag
+[child_process_addr  + 9] = 0;
+
+//set kernel stack pointer
+[child_process_addr  + 12] = 0;
+
+//set tick
+[child_process_addr  + 0] = 0;
+
+//set ppid
+[child_process_addr  + 2] = [SYSTEM_STATUS_TABLE + 1];
+
+//set state
+[child_process_addr  + 4] = CREATED;
+
+
+
+//ptr for stack
+ptr = 8;
+
+//allocate mem for stack
+while(ptr < 10)do
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6);
+
+  //get free page
+
+  call label_memory_manager;
+
+  //multipop
+  multipop(R1, R2, R3, R4, R5, R6);
+
+  //set stack page no
+  [child_ptbr + ptr * 2] = R0;
+
+  //multipop
+  multipop(R0); 
+ 
+  //set permissions
+  [child_ptbr + ptr * 2 + 1] = "0110";
+  
+  ptr = ptr + 1;
+
+endwhile;
+
+
+//allocate space for kernel stack
+
+//multipush
+multipush(R0, R1, R2, R3, R4, R5, R6);
+
+//get free page
+
+call label_memory_manager;
+
+//multipop
+multipop(R1, R2, R3, R4, R5, R6);
+
+//set value in kernel stack
+[child_process_addr + 11] = R0;
+
+//multipop
+multipop(R0);
+
+//child user area
+alias child_user_area R7;
+child_user_area = [child_process_addr + 11];
+
+//parent resource table
+alias parent_resource_table R9;
+parent_resource_table = parent_user_area * 512 + RESOURCE_TABLE_OFFSET;
+
+
+//child resource table
+alias child_resource_table R10;
+child_resource_table = child_user_area * 512 + RESOURCE_TABLE_OFFSET;
+
+//save files and semaphores of parent process in child process
+ptr = 0;
+
+//all files and sems
+while(ptr < 16)do
+  
+  //resources
+  [child_resource_table + ptr] = [parent_resource_table + ptr ];
+
+  //increase no of processes in semaphores
+  if((ptr % 2 == 0) && ([parent_resource_table + ptr] == SEMAPHORE))then
+
+    [SEMAPHORE_TABLE + [ parent_resource_table + 1] * 4 + 1] = [SEMAPHORE_TABLE + [ parent_resource_table + 1] * 4 + 1] + 1;
+
+  endif;
+
+  //increase no of open file instances 
+  if((ptr % 2 == 0) && ([parent_resource_table + ptr] == FILE))then
+
+    [OPEN_FILE_TABLE + [ parent_resource_table + 1] * 4 + 1] = [OPEN_FILE_TABLE + [parent_resource_table + 1] * 4 + 1] + 1;
+
+  endif;
+  
+
+  ptr = ptr + 1;
+
+endwhile;
+
+
+//copy disk map table
+ptr = 0;
+
+while(ptr < 10)do
+  
+  [DISK_MAP_TABLE + 10 * childPID + ptr] = [DISK_MAP_TABLE + 10 * [SYSTEM_STATUS_TABLE + 1] + ptr];
+
+  ptr = ptr + 1;
+
+endwhile;
+
+//initialize page table
+
+//copy lib, heap and code pages
+ptr = 0;
+
+while(ptr < 16)do
+
+  [child_ptbr + ptr] = [PTBR + ptr];
+
+  //increase mem in mem free list
+  if((ptr % 2 == 0) && ([PTBR + ptr] >= 0) && ([PTBR + ptr] < 128))then
+    
+    [MEMORY_FREE_LIST + [PTBR + ptr]] = [MEMORY_FREE_LIST + [PTBR + ptr]] + 1;
+
+  endif;
+
+  ptr = ptr + 1;
+
+endwhile;
+
+
+//copy vals in parent stack to child stack
+
+ptr = 0;
+
+while(ptr < 512)do
+ 
+  //copy content 
+  [[child_ptbr + 16] * 512 + ptr] = [[PTBR + 16] * 512 + ptr];
+  [[child_ptbr + 18] * 512 + ptr] = [[PTBR + 18] * 512 + ptr];
+
+  ptr = ptr + 1;
+
+endwhile;
+
+//push BP to kernel stack
+[child_user_area * 512] = BP;
+
+//save ret value in user stack for parent process
+[([PTBR + 2 * ((userSP - 1) / 512)] * 512) + ((userSP - 1) % 512)] = childPID;
+
+//save ret value in user stack for child process
+[[child_ptbr + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = 0;
+
+
+label_ireturn:
+
+
+//change to user stack of parent process
+SP = userSP;
+
+//reset mode flag of parent process
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+//return to user mode
+ireturn;
+
+label_memory_manager:
+
+//set fun no
+R1 = GET_FREE_PAGE;
+
+//call mem manager
+call MEMORY_MANAGER;
+
+//validate mem free list entry
+[MEMORY_FREE_LIST + R0] = 1;
+
+return;

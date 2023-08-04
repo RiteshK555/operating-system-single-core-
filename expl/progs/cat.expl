@@ -1,0 +1,29 @@
+int main()
+{
+decl
+
+int temp, fileDesc;
+string word;
+
+enddecl
+begin
+
+  //open the file 
+  fileDesc = exposcall("Open", "sample.dat"); 
+
+  //till end of file
+  while(temp >= 0)do
+
+    //get the data from read
+    temp = exposcall("Read", fileDesc, word);
+
+    write(word);
+    
+  endwhile;
+
+
+
+  return 0;
+
+end
+}

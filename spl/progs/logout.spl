@@ -1,0 +1,78 @@
+//int 12 handler (logout sys call)
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//process table addr
+alias process_table_addr R1;
+process_table_addr = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+//set mode flag
+[process_table_addr + 9] = INT_LOGOUT;
+
+//save the sp in its process table
+[process_table_addr + 13] = SP;
+
+
+//switch sp to kernel stack
+SP = [process_table_addr + 11] * 512 - 1;
+
+//pid
+alias currentPID R2;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+//ret addr
+alias ret_addr R3;
+ret_addr = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512);
+
+//current process should be shell
+if(currentPID != 2)then
+
+  //ret -1
+  [ret_addr] = -1;
+
+  //reset mode flag
+  [process_table_addr + 9] = 0;
+
+  //reset user sp
+  SP = userSP;
+
+  ireturn;
+
+endif;
+
+//kill all user processes except shell
+
+//multipush
+multipush(R0, R1, R2, R3);
+
+//fn no
+R1 = KILL_ALL;
+
+//pid
+R2 = currentPID;
+
+//call process manager
+call PROCESS_MANAGER;
+
+//multipop
+multipop(R0, R1, R2, R3);
+
+//terminate shell process
+[process_table_addr + 4] = TERMINATED;
+
+//reset user stack pointer
+[process_table_addr + 13] = 8 * 512;
+
+//reset entry point ip
+[[PAGE_TABLE_BASE + 20 * 2 + 16] * 512 + 0] = [[PAGE_TABLE_BASE + 20 * 2 + 8] * 512 + 1];
+
+//wake login process
+[PROCESS_TABLE + 1 * 16 + 4] = READY;
+
+//reset user id in sys status table (kernel)
+[SYSTEM_STATUS_TABLE + 0] = 0;
+
+//call context switch
+call CONTEXT_SWITCH;

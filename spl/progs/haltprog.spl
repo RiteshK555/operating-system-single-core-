@@ -1,0 +1,61 @@
+//exit sys call
+
+//set mode flag as read sys call
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_EXIT;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//save the sp in its process table
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//set stack pointer to point to kernel stack
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 - 1;
+
+
+//exit process(release pt and mem)
+
+//multipush
+multipush(R0);
+
+//set fn no
+R1 = EXIT_PROCESS;
+
+//set process id
+R2 = [SYSTEM_STATUS_TABLE + 1];
+
+//call process manager
+call PROCESS_MANAGER;
+
+//multipop
+multipop(R0);
+
+//new pid
+alias newPID R1;
+newPID = 1;
+
+//find new pid of process
+while(newPID < MAX_PROC_NUM) do
+
+  //break
+  if(([PROCESS_TABLE + newPID * 16 + 4] == READY) || ([PROCESS_TABLE + newPID * 16 + 4] == CREATED))then
+
+    break;
+
+  endif;
+   
+  newPID = newPID + 1;
+
+endwhile;
+
+//halt if idle process is the only process left
+if(newPID == MAX_PROC_NUM)then
+  
+  halt;
+
+endif;
+
+
+//otherwise schedule the other process
+call CONTEXT_SWITCH;

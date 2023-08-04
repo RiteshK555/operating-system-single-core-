@@ -1,0 +1,122 @@
+//int 17 handler (login sys call)
+
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//process table addr
+alias process_table_addr R1;
+process_table_addr = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+//set mode flag
+[process_table_addr + 9] = INT_LOGIN;
+
+//save the sp in its process table
+[process_table_addr + 13] = SP;
+
+//switch sp to kernel stack
+SP = [process_table_addr + 11] * 512 - 1;
+
+//pid
+alias currentPID R2;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+//ret addr
+alias ret_addr R3;
+ret_addr = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512);
+
+if(currentPID != 1)then
+
+  //ret -1
+  [ret_addr] = -2;
+
+  //go back to user mode
+  goto label_ireturn;
+
+endif;
+
+//user_id
+alias user_id R4;
+user_id = 0;
+
+//username
+alias username R5;
+username = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 1) % 512)];
+
+//password
+alias password R6;
+password = [[PTBR + 2 * ((userSP - 3) / 512)] * 512 + ((userSP - 3) % 512)];
+
+while(user_id < MAX_USER_NUM)do
+
+  if(username == [USER_TABLE + user_id * 2])then
+
+    break;
+
+  endif; 
+
+  user_id = user_id + 1;
+
+endwhile;
+
+if(user_id == MAX_USER_NUM)then
+
+  //ret -1
+  [ret_addr] = -1;
+
+  goto label_ireturn;
+
+endif;
+
+//encrypt password
+encrypt password;
+alias encrypted_password R6;
+
+//check if valid
+if(encrypted_password != [USER_TABLE + user_id * 2 + 1])then
+
+  //ret -1
+  [ret_addr] = -1;
+
+  goto label_ireturn;
+
+endif;
+
+//set state of shell process to created
+[PROCESS_TABLE + 2 * 16 + 4] = CREATED;
+
+//set user id in shell process
+[PROCESS_TABLE + 2 * 16 + 3] = user_id;
+
+//let login wait until shell exits
+
+//wait
+[process_table_addr + 4] = WAIT_PROCESS;
+
+//pid
+[process_table_addr + 5] = 2;
+
+//set user id in sys status table
+[SYSTEM_STATUS_TABLE + 0] = user_id;
+
+//multipush
+multipush(R0, R1, R2, R3, R4, R5, R6);
+
+//context switch
+call CONTEXT_SWITCH;
+
+//multipop
+multipop(R0, R1, R2, R3, R4, R5, R6);
+
+label_ireturn:
+
+//reset mode flag
+[process_table_addr + 9] = 0;
+
+//switch to user stack
+SP = userSP;
+
+//return to user mode
+ireturn;
+

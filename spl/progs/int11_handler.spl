@@ -1,0 +1,171 @@
+breakpoint;
+//int 11 handler (access control sys calls)
+
+//save the sp in its process table
+[PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 13] = SP;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//sys call no
+alias sys_call R1;
+sys_call = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+
+//switch sp to kernel stack
+SP = [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 11] * 512 - 1;
+
+//wait sys call
+if(sys_call == INT_WAIT)then
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_WAIT;
+
+  //get pid from args
+  alias pid R2;
+
+  //arg 1
+  pid = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  if(([PROCESS_TABLE + pid * 16 + 4] == TERMINATED) || ([PROCESS_TABLE + pid * 16 + 4] < 1) || ([PROCESS_TABLE + pid * 16 + 4] > 12) || (pid == [SYSTEM_STATUS_TABLE + 1]))then
+
+ 
+    //set ret value in user stack (failure)
+    [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = -1;  
+
+    //reset mode flag
+    [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+    //reset sp to user stack
+    SP = userSP;
+
+    //ret to user mode
+    ireturn;
+
+  endif;
+
+  //valid conditions
+
+  //set status in process table
+  [PROCESS_TABLE + 16 * [SYSTEM_STATUS_TABLE + 1] + 4] = WAIT_PROCESS;
+  [PROCESS_TABLE + 16 * [SYSTEM_STATUS_TABLE + 1] + 5] = pid;
+
+
+  //multipush
+  multipush(R0, R1, R2);
+ 
+  //schedule other processes;
+  call CONTEXT_SWITCH;
+
+  //multipop
+  multipop(R0, R1, R2);
+
+  //set ret value in user stack (success)
+  [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = 0;  
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //switch to user stack
+  SP = userSP;
+
+  //return to user mode
+  ireturn;
+
+endif;
+
+//signal sys call
+if(sys_call == INT_SIGNAL)then
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_SIGNAL;
+
+  //ptr
+  alias ptr R2;
+  ptr = 0;
+
+  //set ready
+  while(ptr < MAX_PROC_NUM)do
+
+    if(([PROCESS_TABLE + ptr * 16 + 4] == WAIT_PROCESS) && ([PROCESS_TABLE + ptr * 16 + 5] == [SYSTEM_STATUS_TABLE + 1]))then
+
+      //set ready
+      [PROCESS_TABLE + ptr * 16 + 4] = READY;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  //set ret value in user stack (success)
+  [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = 0;  
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //switch to user stack
+  SP = userSP;
+
+  //return to user mode
+  //set ret value in user stack pid
+  [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = [SYSTEM_STATUS_TABLE + 1];  
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //switch to user stack
+  SP = userSP;
+
+  //return to user mode
+  ireturn;
+
+endif;
+
+//get ppid
+if(sys_call == INT_GETPPID)then
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_GETPPID;
+
+  //set ret value in user stack ppid
+  [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = [PROCESS_TABLE + 16 * [SYSTEM_STATUS_TABLE + 1] + 2];
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //switch to user stack
+  SP = userSP;
+
+  //return to user mode
+  ireturn;
+
+endif;
+
+//get pid
+if(sys_call == INT_GETPID)then
+
+  //set mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = INT_GETPID;
+
+  //set ret value in user stack ppid
+  [[PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512)] = [SYSTEM_STATUS_TABLE + 1];
+
+  //reset mode flag
+  [PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16 + 9] = 0;
+
+  //switch to user stack
+  SP = userSP;
+
+  //return to user mode
+  ireturn;
+
+endif;
+
+//switch to user stack
+SP = userSP;
+
+//return to user mode
+ireturn;
+
+

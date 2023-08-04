@@ -1,0 +1,288 @@
+//write sys call
+
+//pid
+alias currentPID R1;
+currentPID = [SYSTEM_STATUS_TABLE + 1];
+
+//process table addr
+alias process_table_addr R2;
+process_table_addr = PROCESS_TABLE + currentPID * 16;
+
+//write sys call
+[process_table_addr + 9] = INT_WRITE;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//user area page
+alias user_area_page R5;
+user_area_page = [process_table_addr + 11];
+
+//switch to kernel stack
+[process_table_addr + 13] = SP;
+SP = [process_table_addr + 11] * 512 - 1;
+
+//file desc
+alias file_desc R3;
+file_desc = [[PTBR + 2 * ((userSP - 4)/ 512)] * 512 + ((userSP - 4) % 512)];
+
+//phy addr ret val
+alias phy_addr R4;
+phy_addr = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512);
+
+if (file_desc == -2)then
+
+  //word addr to be written
+  alias word R6;
+  word = [[PTBR + 2 * ((userSP - 3) / 512)] * 512 + ((userSP - 3) % 512)];
+
+  //call terminal write
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6);
+
+  //fn no
+  R1 = TERMINAL_WRITE;
+
+  //pid
+  R2 = currentPID;
+
+  //word addr
+  R3 = word;
+
+  //call device manager
+  call DEVICE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6);
+
+  [phy_addr] = 0;
+
+  //return
+  goto label_ireturn;
+
+else
+
+  //check file desc
+  if((file_desc < 0) || (file_desc > 7))then
+
+    //ret -1  
+    [phy_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //resource table addr
+  alias resource_addr R6;
+  resource_addr = user_area_page * 512 + RESOURCE_TABLE_OFFSET + file_desc * 2; 
+
+  //if not file
+  if([resource_addr + 0] != FILE)then
+
+    //ret -1
+    [phy_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //open file table entry index
+  alias open_file_table_entry_index R7;
+  open_file_table_entry_index = [resource_addr + 1];
+
+  //inode index
+  alias inode_index R8;
+  inode_index = [OPEN_FILE_TABLE + open_file_table_entry_index * 4];
+
+  //inode addr
+  alias inode_addr R9;
+  inode_addr = INODE_TABLE + 16 * inode_index;
+
+  //exclusive permission
+  if(([inode_addr + 4] == EXCLUSIVE) && ([process_table_addr + 3] != [inode_addr + 3]) && ([process_table_addr + 3] != 1))then
+    
+    //ret -3
+    [phy_addr] = -3;
+
+    goto label_ireturn;
+
+  endif; 
+
+
+  //acquire inode
+  
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9);
+
+  //pid
+  R2 = currentPID;
+
+  //fn no
+  R1 = ACQUIRE_INODE;
+
+  //inode index
+  R3 = inode_index;
+
+  //fail
+  if(R0 < 0)then
+
+    //ret -1
+    [phy_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9);
+
+
+  //lseek addr
+  alias lseek_addr R10;
+  lseek_addr = OPEN_FILE_TABLE + open_file_table_entry_index * 4 + 2;
+
+  //lseek = max file size
+  if([lseek_addr] == MAX_FILE_SIZE)then
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10);
+
+    //call label release inode
+    call label_release_inode;
+
+    //multipop
+    multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10);
+
+    //ret -2
+    [phy_addr] = -2;
+
+    goto label_ireturn;
+
+  endif;
+
+
+  //whether new block is to be allocated
+  if((([lseek_addr] == 512) || ([lseek_addr] == 1024) || ([lseek_addr] == 1536)) && ([lseek_addr] == [inode_addr + 2]))then
+
+    //get a free block
+
+    //multipush
+    multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11);
+
+    //fn no
+    R1 = GET_FREE_BLOCK;
+
+    //call memory manager
+    call MEMORY_MANAGER;
+
+    //fail
+    if(R0 < 0)then
+
+      //call label release inode
+      call label_release_inode;
+ 
+      //ret -2
+      [phy_addr] = -2;
+
+      goto label_ireturn;
+
+    endif;
+
+    //multipop
+    multipop(R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11);
+
+    //save disk block in inode table
+    [inode_addr + 8 + ([lseek_addr] / 512)] = R0;
+
+    //multipop
+    multipop(R0);
+
+  endif;
+
+  //buffered write
+  
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11);
+
+  //fn no
+  R1 = BUFFERED_WRITE;
+
+  //disk block no
+  R2 = [inode_addr + 8 + (([lseek_addr]) / 512)];
+
+  //offset val
+  R3 = (([lseek_addr]) % 512);
+
+  //word
+  R4 = [[PTBR + ((userSP - 3) / 512) * 2] * 512 + ((userSP - 3) % 512)];
+
+
+  //call file manager
+  call FILE_MANAGER;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11);
+
+
+  //if lseek == file size
+  if([lseek_addr] == [inode_addr + 2])then
+
+    //increment file size
+    [inode_addr + 2] = [inode_addr + 2] + 1;
+
+  endif;
+
+  //increment lseek
+  [lseek_addr] = [lseek_addr] + 1;
+
+  //release inode
+
+  //multipush
+  multipush(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11);
+
+  //call label release inode
+  call label_release_inode;
+
+  //multipop
+  multipop(R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11);
+
+  //ret 0 (success)
+  [phy_addr] = 0;
+
+
+  //ireturn
+  goto label_ireturn;
+
+  //label release inode
+  label_release_inode:
+
+  //release inode
+
+  //pid
+  R2 = currentPID;
+
+  //fn no
+  R1 = RELEASE_INODE;
+
+  //inode index
+  R3 = inode_index;
+
+  call RESOURCE_MANAGER;
+
+  return;
+
+
+endif;
+
+//label ireturn;
+label_ireturn:
+
+//reset sp
+SP = userSP;
+
+//reset mode flag
+[process_table_addr + 9] = 0;
+
+ireturn;

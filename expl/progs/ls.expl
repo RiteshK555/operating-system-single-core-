@@ -1,0 +1,34 @@
+int main()
+{
+decl
+  int temp, ptr, fileDesc;
+  string fileName;
+enddecl
+begin
+
+  //open root file
+  fileDesc = exposcall("Open", "root");
+
+  ptr = 0;
+
+  while(ptr >= 0)do
+
+    //get file name
+    ptr = exposcall("Read", fileDesc, fileName);
+
+    //write to terminal
+
+    if(fileName != "-1")then
+      write(fileName);
+    endif;
+
+    //increment lseek
+    temp = exposcall("Seek", fileDesc, 7);
+
+  endwhile;
+
+  return 0;
+
+end
+
+}

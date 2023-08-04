@@ -1,0 +1,346 @@
+
+//int 16 sys call
+
+//process table addr
+alias process_table_addr R1;
+process_table_addr = PROCESS_TABLE + [SYSTEM_STATUS_TABLE + 1] * 16;
+
+//save the sp in its process table
+[process_table_addr + 13] = SP;
+
+//save sp
+alias userSP R0;
+userSP = SP;
+
+//sys call no
+alias sys_call R2;
+sys_call = [[PTBR + 2 * ((userSP - 5) / 512)] * 512 + ((userSP - 5) % 512)];
+
+//switch sp to kernel stack
+SP = [process_table_addr + 11] * 512 - 1;
+
+//ret addr
+alias ret_addr R3;
+ret_addr = [PTBR + 2 * ((userSP - 1) / 512)] * 512 + ((userSP - 1) % 512);
+
+//new user
+if(sys_call == INT_NEWUSR)then
+
+  //set mode flag
+  [process_table_addr + 9] = INT_NEWUSR;
+
+
+  //ptr
+  alias ptr R4;
+  ptr = 0;
+
+  //user should be root and process should be shell
+  if(([SYSTEM_STATUS_TABLE + 0] != 1) || ([SYSTEM_STATUS_TABLE + 1] != 2))then
+
+    //ret -2
+    [ret_addr] = -2;
+   
+    goto label_ireturn;
+
+  endif;
+
+
+  //username
+  alias username R5;
+  username = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  //password
+  alias password R6;
+  password = [[PTBR + 2 * ((userSP - 3) / 512)] * 512 + ((userSP - 3) % 512)];
+
+  while(ptr < MAX_USER_NUM)do
+
+    if([USER_TABLE + ptr * 2] == username)then
+
+      //ret -1
+      [ret_addr] = -1;
+
+      goto label_ireturn;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+
+  ptr = 0;
+
+  while(ptr < MAX_USER_NUM)do
+
+    if([USER_TABLE + ptr * 2] == "-1")then
+
+      break;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  if(ptr == MAX_USER_NUM)then
+
+    //ret -3
+    [ret_addr] = -3;
+
+    goto label_ireturn;
+
+  endif;
+
+
+  //username
+  [USER_TABLE + ptr * 2] = username;
+
+  //encrypt password
+  encrypt password;
+
+  //password
+  [USER_TABLE + ptr * 2 + 1] = password;
+
+  //ret 0
+  [ret_addr] = 0;
+
+  goto label_ireturn;
+
+endif;
+
+//remove user
+if(sys_call == INT_REMUSR)then
+
+  //set mode flag
+  [process_table_addr + 9] = INT_REMUSR;
+
+  //ptr
+  alias ptr R4;
+  ptr = 0;
+
+  //user should be root and process should be shell
+  if(([SYSTEM_STATUS_TABLE + 0] != 1) || ([SYSTEM_STATUS_TABLE + 1] != 2))then
+
+    //ret -2
+    [ret_addr] = -2;
+
+    goto label_ireturn;
+
+  endif;
+
+  //username
+  alias username R5;
+  username = [[PTBR + 2 * ((userSP - 4) / 512)] * 512 + ((userSP - 4) % 512)];
+
+  while(ptr < MAX_USER_NUM)do
+
+    if([USER_TABLE + ptr * 2 + 0] == username)then
+
+      break;
+
+    endif;    
+
+    ptr = ptr + 1;
+
+  endwhile;
+ 
+  if(ptr == MAX_USER_NUM)then
+
+    //ret -1
+    [ret_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  alias user_id R6;
+  user_id = ptr;
+
+  ptr = 0;
+
+  while(ptr < MAX_FILE_NUM)do
+
+    if([ROOT_FILE + 8 * ptr + 3] == username)then
+
+      //ret -3
+      [ret_addr] = -3;
+
+      goto label_ireturn;
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;
+
+  //reset username
+  [USER_TABLE + user_id * 2 + 0] = -1;
+
+  //reset password
+  [USER_TABLE + user_id * 2 + 1] = -1;
+
+  //ret 0
+  [ret_addr] = 0;
+
+  goto label_ireturn;
+
+endif;
+
+//setpwd
+if(sys_call == INT_SETPWD)then
+
+  //set mode flag
+  [process_table_addr + 9] = INT_SETPWD;
+
+  //check if current process is shell
+  if([SYSTEM_STATUS_TABLE + 1] != 2)then
+
+    //ret -1
+    [ret_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //user id
+  alias user_id R4;
+  user_id = 0;
+
+  //username
+  alias username R5;
+  username = [[PTBR + ((userSP - 4) / 512) * 2] * 512 + ((userSP - 4) % 512)];
+
+  //password
+  alias password R6;
+  password = [[PTBR + ((userSP - 3) / 512) * 2] * 512 + ((userSP - 3) % 512)];
+
+  while(user_id < MAX_USER_NUM)do
+
+    if(username == [USER_TABLE + user_id * 2 + 0])then
+
+      break;
+
+    endif;
+
+    user_id = user_id + 1;
+
+  endwhile;
+
+  if(user_id == MAX_USER_NUM)then
+
+    //ret -2
+    [ret_addr] = -2;
+
+    goto label_ireturn;
+
+  endif;
+
+  if(user_id != [SYSTEM_STATUS_TABLE + 0])then
+
+    //check if root 
+    if(user_id != 1)then
+
+      //ret -1
+      [ret_addr] = -1;
+
+    endif;
+
+  endif;
+
+  //encrypt pwd
+  encrypt password;
+
+  //set pwd
+  [USER_TABLE + user_id * 2 + 1] = password;
+
+  //ret 0
+  [ret_addr] = 0;
+  
+  goto label_ireturn; 
+
+endif;
+
+//get uid
+if(sys_call == INT_GETUID)then
+
+  //set mode flag
+  [process_table_addr + 9] = INT_GETUID;
+
+  //ptr
+  alias ptr R4;
+  ptr = 0;
+
+  //username
+  alias username R5;
+  username = [[PTBR + ((userSP - 4) / 512) * 2] * 512 + ((userSP - 1) % 512)];
+
+  while(ptr < MAX_USER_NUM)do
+
+    if([USER_TABLE + ptr * 2 + 0] == username)then
+ 
+      //ret uid
+      [ret_addr] = ptr;
+
+      goto label_ireturn; 
+
+    endif;
+
+    ptr = ptr + 1;
+
+  endwhile;  
+
+  //ret -1
+  [ret_addr] = -1;
+
+  goto label_ireturn;
+
+endif;
+
+//get username
+if(sys_call == INT_GETUNAME)then
+
+  //set mode flag
+  [process_table_addr + 9] = INT_GETUNAME;
+
+  //get uid
+  alias user_id R4;
+  user_id = [[PTBR + ((userSP - 4) / 512) * 2] * 512 + ((userSP - 4) % 512)];
+
+  //check validity
+  if((user_id < 0) || (user_id > 15))then
+
+    //ret -1
+    [ret_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //check username
+  if([USER_TABLE + user_id * 2 + 0] == -1)then
+
+    //ret -1
+    [ret_addr] = -1;
+
+    goto label_ireturn;
+
+  endif;
+
+  //ret username
+  [ret_addr] = [USER_TABLE + user_id * 2 + 0];
+
+  goto label_ireturn;
+
+endif;
+
+label_ireturn:
+
+//reset mode flag
+[process_table_addr + 9] = 0;
+
+//switch to user stack
+SP = userSP;
+
+//return to user mode
+ireturn;
